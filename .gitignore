@@ -1,0 +1,13 @@
+# Python / backend
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.pytest_cache/
+*.pyc
+
+# Env files
+.env
+.env.local
+
+# OS
+.DS_Store

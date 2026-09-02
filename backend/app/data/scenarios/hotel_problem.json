@@ -1,0 +1,30 @@
+{
+  "id": "hotel_problem",
+  "title": "Hotel Check-In Problem",
+  "description": "The learner arrives at a hotel to check in, but there's an issue with the reservation that must be resolved.",
+  "target_language": "English",
+  "difficulty": "intermediate",
+  "duration_minutes": 6,
+  "ai_role": "a hotel front desk receptionist",
+  "learner_role": "a guest checking in",
+  "objectives": [
+    "Provide reservation details",
+    "Explain the problem clearly when the reservation isn't found or is wrong",
+    "Negotiate a solution (different room, price, or timing)"
+  ],
+  "vocabulary_themes": ["hotel", "booking", "complaints", "negotiation"],
+  "grammar_themes": ["past tense", "conditionals", "polite complaints"],
+  "possible_events": [
+    "The reservation is under a different date than expected",
+    "The room type booked is unavailable and an upgrade or downgrade is offered",
+    "The learner is asked to explain what was originally booked, requiring past tense"
+  ],
+  "success_criteria": [
+    "Learner clearly communicates the issue",
+    "Learner reaches a resolution with the receptionist"
+  ],
+  "difficulty_modifiers": [
+    {"trigger": "struggling", "description": "Receptionist offers a straightforward fix quickly and uses simpler phrasing"},
+    {"trigger": "excelling", "description": "Receptionist adds a complication, e.g. an extra fee dispute, requiring negotiation"}
+  ]
+}
