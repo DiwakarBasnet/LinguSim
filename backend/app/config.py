@@ -6,8 +6,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        # Supports running uvicorn from either the repo root or backend/ —
-        # the root .env.example is meant to be copied to a root .env.
         env_file=(".env", "../.env"),
         env_file_encoding="utf-8",
         extra="ignore",
@@ -15,6 +13,8 @@ class Settings(BaseSettings):
 
     voice_agent_provider: Literal["mock", "assemblyai"] = "mock"
     assemblyai_api_key: str = ""
+    assemblyai_ws_url: str = "wss://agents.assemblyai.com/v1/ws"
+    assemblyai_voice_id: str = "ivy"
 
     database_url: str = "postgresql+psycopg://speakquest:speakquest@localhost:5432/speakquest"
 

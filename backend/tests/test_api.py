@@ -1,5 +1,7 @@
 from fastapi.testclient import TestClient
 
+from app.config import get_settings
+
 
 def test_health(client: TestClient):
     resp = client.get("/health")
@@ -23,6 +25,9 @@ def test_get_scenario_404(client: TestClient):
 def test_conversation_ws_full_flow(client: TestClient):
     with client.websocket_connect("/ws/conversation") as ws:
         ws.send_json({"type": "start", "scenario_id": "order_food"})
+        ready = ws.receive_json()
+        assert ready == {"type": "session_ready", "mode": "mock"}
+
         opening = ws.receive_json()
         assert opening["type"] == "agent_text"
         assert opening["turn_index"] == 0
@@ -51,3 +56,17 @@ def test_conversation_ws_user_text_before_start(client: TestClient):
         ws.send_json({"type": "user_text", "text": "hello"})
         resp = ws.receive_json()
         assert resp["type"] == "error"
+
+
+def test_conversation_ws_assemblyai_without_api_key_errors(client: TestClient, monkeypatch):
+    monkeypatch.setenv("VOICE_AGENT_PROVIDER", "assemblyai")
+    monkeypatch.setenv("ASSEMBLYAI_API_KEY", "")
+    get_settings.cache_clear()
+    try:
+        with client.websocket_connect("/ws/conversation") as ws:
+            ws.send_json({"type": "start", "scenario_id": "order_food"})
+            resp = ws.receive_json()
+            assert resp["type"] == "error"
+            assert "ASSEMBLYAI_API_KEY" in resp["message"]
+    finally:
+        get_settings.cache_clear()
