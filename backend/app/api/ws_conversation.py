@@ -5,8 +5,13 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.config import get_settings
+from app.db.session import create_session
+from app.models.conversation import Transcript, Turn
+from app.models.scenario import Scenario
 from app.services.conversation_manager import ConversationManager
+from app.services.evaluation import create_evaluator
 from app.services.scenario_loader import ScenarioNotFoundError, get_scenario_loader
+from app.services.session_service import SessionService
 from app.services.voice_agent.assemblyai_client import AssemblyAIRelay, AssemblyAIRelayError
 
 logger = logging.getLogger(__name__)
@@ -32,7 +37,8 @@ async def conversation_ws(websocket: WebSocket) -> None:
       {"type": "agent_text", "text": "...", "turn_index": N}
       {"type": "user_transcript", "text": "...", "turn_index": N}   # assemblyai only
       {"type": "clear_audio"}                    # assemblyai only: barge-in, stop playback
-      {"type": "session_end", "transcript": {...}}
+      {"type": "session_end", "transcript": {...}, "evaluation": {...},
+       "profile": {...}, "recommended_scenario_id": "..."}
       {"type": "error", "message": "..."}
       <binary PCM16 24kHz mono frame>            # agent reply audio, assemblyai only
     """
@@ -43,8 +49,25 @@ async def conversation_ws(websocket: WebSocket) -> None:
     manager: ConversationManager | None = None
     relay: AssemblyAIRelay | None = None
     relay_task: asyncio.Task | None = None
-    scenario_id: str | None = None
+    scenario: Scenario | None = None
     relay_turns: list[dict] = []
+
+    async def finish_and_report(transcript: Transcript) -> None:
+        assert scenario is not None
+        db = create_session()
+        try:
+            evaluator = create_evaluator(settings.evaluation_provider)
+            service = SessionService(db, evaluator, loader)
+            result = await service.finish_session(scenario, transcript)
+        except Exception:
+            logger.exception("session_finish_failed")
+            await websocket.send_json(
+                {"type": "session_end", "transcript": transcript.model_dump(), "error": "Evaluation failed."}
+            )
+            return
+        finally:
+            db.close()
+        await websocket.send_json({"type": "session_end", "transcript": transcript.model_dump(), **result})
 
     async def pump_relay_events(active_relay: AssemblyAIRelay) -> None:
         try:
@@ -127,6 +150,9 @@ async def conversation_ws(websocket: WebSocket) -> None:
                     )
 
             elif msg_type == "end":
+                if scenario is None:
+                    await websocket.send_json({"type": "session_end", "transcript": {"scenario_id": None, "turns": []}})
+                    break
                 if relay is not None:
                     await relay.end()
                     if relay_task is not None:
@@ -135,12 +161,14 @@ async def conversation_ws(websocket: WebSocket) -> None:
                         except (TimeoutError, asyncio.CancelledError):
                             pass
                     await relay.close()
-                    await websocket.send_json(
-                        {"type": "session_end", "transcript": {"scenario_id": scenario_id, "turns": relay_turns}}
+                    transcript = Transcript(
+                        scenario_id=scenario.id if scenario else "",
+                        turns=[Turn(**turn) for turn in relay_turns],
                     )
+                    await finish_and_report(transcript)
                 elif manager is not None:
                     transcript = await manager.end()
-                    await websocket.send_json({"type": "session_end", "transcript": transcript.model_dump()})
+                    await finish_and_report(transcript)
                 break
 
             else:

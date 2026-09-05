@@ -34,3 +34,49 @@ export interface Transcript {
   scenario_id: string;
   turns: Turn[];
 }
+
+export interface EvaluationResult {
+  overall_score: number;
+  grammar: number;
+  vocabulary: number;
+  fluency: number;
+  hesitation: number;
+  task_completion: number;
+  conversation_handling: number;
+  weaknesses: string[];
+  strengths: string[];
+}
+
+export interface LearnerProfile {
+  target_language: string;
+  level: string;
+  grammar: Record<string, number>;
+  vocabulary: Record<string, number>;
+  fluency: number | null;
+  hesitation: number | null;
+  // Never populated: evaluation only ever sees a text transcript, which
+  // carries no phoneme/acoustic signal — see backend LearnerProfileRecord.
+  pronunciation: number | null;
+  completed_scenarios: number;
+  updated_at: string | null;
+  recommended_scenario_id: string | null;
+}
+
+export interface SessionSummary {
+  id: string;
+  scenario_id: string;
+  scenario_title: string;
+  difficulty: Difficulty;
+  evaluation: EvaluationResult;
+  created_at: string;
+}
+
+export interface SessionEndPayload {
+  type: "session_end";
+  transcript: Transcript;
+  session_id?: string;
+  evaluation?: EvaluationResult;
+  profile?: LearnerProfile;
+  recommended_scenario_id?: string;
+  error?: string;
+}

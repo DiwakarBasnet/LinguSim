@@ -39,6 +39,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             >
               Scenarios
             </Link>
+            <Link
+              href="/progress"
+              className="text-black/60 hover:text-black dark:text-white/60 dark:hover:text-white"
+            >
+              Progress
+            </Link>
           </nav>
         </header>
         <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-8">{children}</main>

@@ -1,4 +1,4 @@
-import type { Scenario } from "./types";
+import type { LearnerProfile, Scenario, SessionSummary } from "./types";
 
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
@@ -20,6 +20,22 @@ export async function fetchScenario(scenarioId: string): Promise<Scenario> {
   });
   if (!res.ok) {
     throw new Error(`Failed to load scenario '${scenarioId}': ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchProfile(): Promise<LearnerProfile> {
+  const res = await fetch(`${API_BASE_URL}/profile`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`Failed to load profile: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchSessions(): Promise<SessionSummary[]> {
+  const res = await fetch(`${API_BASE_URL}/sessions`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`Failed to load sessions: ${res.status}`);
   }
   return res.json();
 }

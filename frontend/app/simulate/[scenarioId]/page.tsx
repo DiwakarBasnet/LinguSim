@@ -17,7 +17,7 @@ import {
   type AudioPlayerHandle,
   type MicStreamHandle,
 } from "@/lib/audioStream";
-import type { Scenario, Transcript, Turn } from "@/lib/types";
+import type { EvaluationResult, Scenario, SessionEndPayload, Transcript, Turn } from "@/lib/types";
 
 type Status = "loading" | "connecting" | "in_progress" | "ended" | "error";
 type Mode = "mock" | "assemblyai" | null;
@@ -40,6 +40,9 @@ export default function SimulatePage({
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [draft, setDraft] = useState("");
   const [finalTranscript, setFinalTranscript] = useState<Transcript | null>(null);
+  const [evaluation, setEvaluation] = useState<EvaluationResult | null>(null);
+  const [recommendedScenario, setRecommendedScenario] = useState<Scenario | null>(null);
+  const [endRequested, setEndRequested] = useState(false);
 
   const socketRef = useRef<WebSocket | null>(null);
   const modeRef = useRef<Mode>(null);
@@ -142,10 +145,16 @@ export default function SimulatePage({
         playerRef.current?.clear();
         setAiSpeaking(false);
       } else if (message.type === "session_end") {
-        setFinalTranscript(message.transcript);
+        const payload = message as SessionEndPayload;
+        setFinalTranscript(payload.transcript);
+        setEvaluation(payload.evaluation ?? null);
         setStatus("ended");
         setListening(false);
         teardownAudio();
+        if (payload.error) setErrorMessage(payload.error);
+        if (payload.recommended_scenario_id) {
+          fetchScenario(payload.recommended_scenario_id).then(setRecommendedScenario).catch(() => {});
+        }
       } else if (message.type === "error") {
         setErrorMessage(message.message);
       }
@@ -192,6 +201,7 @@ export default function SimulatePage({
   };
 
   const endSession = () => {
+    setEndRequested(true);
     socketRef.current?.send(JSON.stringify({ type: "end" }));
   };
 
@@ -309,25 +319,107 @@ export default function SimulatePage({
           <button
             type="button"
             onClick={endSession}
-            className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+            disabled={endRequested}
+            className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
           >
-            End
+            {endRequested ? "Ending…" : "End"}
           </button>
         </form>
       )}
 
-      {status === "ended" && finalTranscript && (
-        <div className="rounded-lg border border-black/10 p-4 dark:border-white/10">
-          <h2 className="font-medium">Session ended</h2>
-          <p className="mt-1 text-sm text-black/60 dark:text-white/60">
-            {finalTranscript.turns.length} turns recorded. Evaluation and profile updates
-            aren&apos;t built yet — this transcript is captured so that step can plug in next.
-          </p>
-          <Link href="/scenarios" className="mt-3 inline-block text-sm underline">
-            Try another scenario
-          </Link>
+      {status === "ended" && endRequested && !evaluation && !errorMessage && (
+        <p className="text-sm text-black/60 dark:text-white/60">Evaluating your conversation…</p>
+      )}
+
+      {status === "ended" && evaluation && (
+        <FeedbackPanel
+          evaluation={evaluation}
+          recommendedScenario={recommendedScenario}
+          turnCount={finalTranscript?.turns.length ?? 0}
+        />
+      )}
+    </div>
+  );
+}
+
+function ScoreRow({ label, score }: { label: string; score: number }) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="w-40 shrink-0 text-sm text-black/60 dark:text-white/60">{label}</span>
+      <div className="h-2 flex-1 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+        <div className="h-full rounded-full bg-black dark:bg-white" style={{ width: `${score}%` }} />
+      </div>
+      <span className="w-12 shrink-0 text-right text-sm tabular-nums">{(score / 10).toFixed(1)}/10</span>
+    </div>
+  );
+}
+
+function FeedbackPanel({
+  evaluation,
+  recommendedScenario,
+  turnCount,
+}: {
+  evaluation: EvaluationResult;
+  recommendedScenario: Scenario | null;
+  turnCount: number;
+}) {
+  return (
+    <div className="flex flex-col gap-5 rounded-lg border border-black/10 p-5 dark:border-white/10">
+      <div>
+        <h2 className="text-lg font-semibold">Session feedback</h2>
+        <p className="text-sm text-black/60 dark:text-white/60">
+          {turnCount} turns · overall {(evaluation.overall_score / 10).toFixed(1)}/10
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <ScoreRow label="Grammar" score={evaluation.grammar} />
+        <ScoreRow label="Vocabulary" score={evaluation.vocabulary} />
+        <ScoreRow label="Fluency" score={evaluation.fluency} />
+        <ScoreRow label="Hesitation" score={evaluation.hesitation} />
+        <ScoreRow label="Task completion" score={evaluation.task_completion} />
+        <ScoreRow label="Conversation handling" score={evaluation.conversation_handling} />
+      </div>
+      <p className="text-xs text-black/40 dark:text-white/40">
+        Pronunciation isn&apos;t scored yet — that needs real acoustic/phoneme analysis, which
+        this evaluator (working from the text transcript only) can&apos;t honestly provide.
+      </p>
+
+      {evaluation.strengths.length > 0 && (
+        <div>
+          <h3 className="text-sm font-medium">What you did well</h3>
+          <ul className="mt-1 list-inside list-disc text-sm text-black/70 dark:text-white/70">
+            {evaluation.strengths.map((s) => (
+              <li key={s}>{s}</li>
+            ))}
+          </ul>
         </div>
       )}
+
+      {evaluation.weaknesses.length > 0 && (
+        <div>
+          <h3 className="text-sm font-medium">Areas to improve</h3>
+          <ul className="mt-1 list-inside list-disc text-sm text-black/70 dark:text-white/70">
+            {evaluation.weaknesses.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between border-t border-black/10 pt-4 dark:border-white/10">
+        <Link href="/scenarios" className="text-sm underline">
+          Browse all scenarios
+        </Link>
+        {recommendedScenario && (
+          <Link
+            href={`/simulate/${recommendedScenario.id}`}
+            className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-black/80 dark:bg-white dark:text-black dark:hover:bg-white/80"
+          >
+            Try this next: {recommendedScenario.title}
+          </Link>
+        )}
+      </div>
     </div>
   );
 }
