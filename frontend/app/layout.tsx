@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SpeakQuest",
-  description: "Adaptive real-world language simulation coach",
+  title: "LinguSim",
+  description: "Adaptive voice-based language simulation engine",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -26,9 +26,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col">
         <header className="border-b border-black/10 dark:border-white/10">
-          <nav className="mx-auto flex max-w-4xl items-center gap-6 px-6 py-4 text-sm">
+          <nav className="mx-auto flex max-w-6xl items-center gap-6 px-6 py-4 text-sm">
             <Link href="/" className="font-semibold tracking-tight">
-              SpeakQuest
+              LinguSim
             </Link>
             <Link href="/" className="text-black/60 hover:text-black dark:text-white/60 dark:hover:text-white">
               Dashboard
@@ -37,17 +37,17 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               href="/scenarios"
               className="text-black/60 hover:text-black dark:text-white/60 dark:hover:text-white"
             >
-              Scenarios
+              Missions
             </Link>
             <Link
               href="/progress"
               className="text-black/60 hover:text-black dark:text-white/60 dark:hover:text-white"
             >
-              Progress
+              Journey
             </Link>
           </nav>
         </header>
-        <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-8">{children}</main>
+        <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">{children}</main>
       </body>
     </html>
   );

@@ -16,5 +16,14 @@ class EvaluationResult(BaseModel):
     hesitation: int = Field(ge=0, le=100, description="Higher = fewer fillers/hesitations")
     task_completion: int = Field(ge=0, le=100)
     conversation_handling: int = Field(ge=0, le=100)
+    communication_recovery: int = Field(
+        ge=0,
+        le=100,
+        description=(
+            "Ability to recover when misunderstood, surprised, or hit with an "
+            "unexpected complication mid-conversation: asking for clarification, "
+            "rephrasing, adapting, and still completing the original task."
+        ),
+    )
     weaknesses: list[str] = Field(default_factory=list)
     strengths: list[str] = Field(default_factory=list)

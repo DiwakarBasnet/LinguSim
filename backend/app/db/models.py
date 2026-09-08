@@ -25,6 +25,11 @@ class SessionRecord(Base):
     difficulty: Mapped[str] = mapped_column(String, nullable=False)
     transcript: Mapped[list] = mapped_column(JSON, nullable=False)
     evaluation: Mapped[dict] = mapped_column(JSON, nullable=False)
+    # Complications actually injected mid-conversation (see AssemblyAIRelay.
+    # inject_complication) — what made this run of the scenario dynamic
+    # rather than a fixed script. Empty when none fired (e.g. session ended
+    # early).
+    complications: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
@@ -48,5 +53,6 @@ class LearnerProfileRecord(Base):
     vocabulary: Mapped[dict] = mapped_column(JSON, default=dict)
     fluency: Mapped[float | None] = mapped_column(Float, nullable=True)
     hesitation: Mapped[float | None] = mapped_column(Float, nullable=True)
+    communication_recovery: Mapped[float | None] = mapped_column(Float, nullable=True)
     completed_scenarios: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

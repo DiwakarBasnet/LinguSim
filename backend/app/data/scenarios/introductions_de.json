@@ -1,0 +1,29 @@
+{
+  "id": "introductions_de",
+  "title": "Meeting Someone New",
+  "description": "The learner meets a new person at a community event and makes small talk: names, where they're from, what they do. The whole conversation is conducted in German.",
+  "target_language": "German",
+  "difficulty": "beginner",
+  "duration_minutes": 3,
+  "ai_role": "a friendly stranger at a community event",
+  "learner_role": "someone introducing themselves",
+  "objectives": [
+    "Introduce yourself by name",
+    "Say where you are from",
+    "Ask the other person a question back"
+  ],
+  "vocabulary_themes": ["greetings", "personal information", "small talk"],
+  "grammar_themes": ["present tense", "question formation"],
+  "possible_events": [
+    "The other person mentions a shared interest",
+    "The other person asks a follow-up question the learner didn't expect"
+  ],
+  "success_criteria": [
+    "Learner introduces themselves clearly",
+    "Learner asks at least one question back"
+  ],
+  "difficulty_modifiers": [
+    {"trigger": "struggling", "description": "Stick to short, predictable questions like 'What's your name?'"},
+    {"trigger": "excelling", "description": "Introduce a more open-ended or unexpected question, e.g. about a hobby"}
+  ]
+}

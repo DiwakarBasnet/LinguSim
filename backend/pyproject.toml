@@ -1,7 +1,7 @@
 [project]
 name = "speakquest-backend"
 version = "0.1.0"
-description = "SpeakQuest backend: adaptive real-world language simulation coach"
+description = "LinguSim backend: adaptive voice-based language simulation engine"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",

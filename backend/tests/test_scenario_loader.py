@@ -32,3 +32,14 @@ def test_system_prompt_includes_role_and_objectives(loader: ScenarioLoader):
     prompt = scenario.system_prompt()
     assert scenario.ai_role in prompt
     assert scenario.objectives[0] in prompt
+
+
+def test_german_scenario_metadata_is_english_but_prompt_demands_german(loader: ScenarioLoader):
+    scenario = loader.get("order_food_de")
+    assert scenario.target_language == "German"
+    # Scenario browsing metadata stays readable for a new learner...
+    assert scenario.title == "Ordering Food at a Cafe"
+    assert scenario.ai_role == "a friendly cafe server"
+    # ...but the prompt explicitly demands the conversation itself be German.
+    prompt = scenario.system_prompt()
+    assert "Conduct the ENTIRE conversation in German" in prompt

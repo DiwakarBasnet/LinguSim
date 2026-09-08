@@ -4,13 +4,6 @@ import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { fetchScenario, WS_BASE_URL } from "@/lib/api";
 import {
-  isSpeechRecognitionSupported,
-  languageTag,
-  speak,
-  startListening,
-  type RecognitionHandle,
-} from "@/lib/speech";
-import {
   isMicStreamingSupported,
   startAudioPlayer,
   startMicStreaming,
@@ -20,7 +13,6 @@ import {
 import type { EvaluationResult, Scenario, SessionEndPayload, Transcript, Turn } from "@/lib/types";
 
 type Status = "loading" | "connecting" | "in_progress" | "ended" | "error";
-type Mode = "mock" | "assemblyai" | null;
 
 export default function SimulatePage({
   params,
@@ -31,7 +23,6 @@ export default function SimulatePage({
 
   const [scenario, setScenario] = useState<Scenario | null>(null);
   const [status, setStatus] = useState<Status>("loading");
-  const [mode, setMode] = useState<Mode>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [aiSpeaking, setAiSpeaking] = useState(false);
@@ -43,18 +34,16 @@ export default function SimulatePage({
   const [evaluation, setEvaluation] = useState<EvaluationResult | null>(null);
   const [recommendedScenario, setRecommendedScenario] = useState<Scenario | null>(null);
   const [endRequested, setEndRequested] = useState(false);
+  const [latestComplication, setLatestComplication] = useState<string | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
-  const modeRef = useRef<Mode>(null);
-  const recognitionRef = useRef<RecognitionHandle | null>(null);
   const micHandleRef = useRef<MicStreamHandle | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const playerRef = useRef<AudioPlayerHandle | null>(null);
   const aiSpeakingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const transcriptEndRef = useRef<HTMLDivElement>(null);
 
-  const browserSpeechSupported = isSpeechRecognitionSupported();
   const micStreamingSupported = isMicStreamingSupported();
-  const langTag = scenario ? languageTag(scenario.target_language) : "en-US";
 
   const sendUserText = useCallback((text: string) => {
     const trimmed = text.trim();
@@ -64,7 +53,6 @@ export default function SimulatePage({
   }, []);
 
   const teardownAudio = useCallback(() => {
-    recognitionRef.current?.stop();
     micHandleRef.current?.stop();
     playerRef.current?.close();
     audioContextRef.current?.close().catch(() => {});
@@ -114,28 +102,9 @@ export default function SimulatePage({
       const message = JSON.parse(event.data);
 
       if (message.type === "session_ready") {
-        modeRef.current = message.mode;
-        setMode(message.mode);
         setStatus("in_progress");
       } else if (message.type === "agent_text") {
         setTurns((prev) => [...prev, { turn_index: message.turn_index, speaker: "ai", text: message.text }]);
-
-        if (modeRef.current !== "assemblyai") {
-          // Mock provider: no real audio stream, so speak it client-side and
-          // only listen for the learner's reply once that finishes.
-          recognitionRef.current?.stop();
-          setListening(false);
-          setAiSpeaking(true);
-          speak(message.text, langTag, () => {
-            setAiSpeaking(false);
-            if (browserSpeechSupported) {
-              recognitionRef.current = startListening(langTag, (text) => sendUserText(text), (msg) =>
-                setErrorMessage(msg)
-              );
-              setListening(true);
-            }
-          });
-        }
       } else if (message.type === "user_transcript") {
         setTurns((prev) => [
           ...prev,
@@ -144,6 +113,8 @@ export default function SimulatePage({
       } else if (message.type === "clear_audio") {
         playerRef.current?.clear();
         setAiSpeaking(false);
+      } else if (message.type === "complication") {
+        setLatestComplication(message.text);
       } else if (message.type === "session_end") {
         const payload = message as SessionEndPayload;
         setFinalTranscript(payload.transcript);
@@ -178,6 +149,11 @@ export default function SimulatePage({
     const interval = setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
     return () => clearInterval(interval);
   }, [status]);
+
+  // Keep the newest message in view as the conversation grows.
+  useEffect(() => {
+    transcriptEndRef.current?.scrollIntoView({ block: "end" });
+  }, [turns]);
 
   const armMicStreaming = async () => {
     if (!micStreamingSupported || !socketRef.current) return;
@@ -217,24 +193,28 @@ export default function SimulatePage({
       <div className="flex flex-col gap-3">
         <p className="text-red-600 dark:text-red-400">{errorMessage}</p>
         <Link href="/scenarios" className="text-sm underline">
-          Back to scenarios
+          Back to missions
         </Link>
       </div>
     );
   }
 
-  const needsMicArm = mode === "assemblyai" && !micArmed && status !== "ended";
+  const needsMicArm = !micArmed && status !== "ended";
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">{scenario?.title}</h1>
-          <p className="text-sm text-black/60 dark:text-white/60">
-            You: {scenario?.learner_role} · AI: {scenario?.ai_role}
-          </p>
+          {scenario?.description && (
+            <p className="mt-1 text-sm text-black/60 dark:text-white/60">{scenario.description}</p>
+          )}
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-black/50 dark:text-white/50">
+            <span>Your role: {scenario?.learner_role}</span>
+            <span>AI plays: {scenario?.ai_role}</span>
+          </div>
         </div>
-        <div className="text-right text-sm text-black/60 dark:text-white/60">
+        <div className="shrink-0 text-right text-sm text-black/60 dark:text-white/60">
           <div>{minutes}:{seconds}</div>
           <div className="mt-1 flex items-center justify-end gap-1.5">
             <span
@@ -253,9 +233,9 @@ export default function SimulatePage({
         </p>
       )}
 
-      {mode === "mock" && !browserSpeechSupported && status !== "ended" && (
-        <p className="rounded-md border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-700 dark:text-yellow-400">
-          Your browser doesn&apos;t support speech recognition — type your responses below instead.
+      {latestComplication && status === "in_progress" && (
+        <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-400">
+          ⚡ Things just changed: {latestComplication}
         </p>
       )}
 
@@ -277,7 +257,7 @@ export default function SimulatePage({
         </div>
       )}
 
-      <div className="flex min-h-64 flex-col gap-3 rounded-lg border border-black/10 p-4 dark:border-white/10">
+      <div className="flex h-[28rem] flex-col justify-end gap-3 overflow-y-auto rounded-lg border border-black/10 p-4 dark:border-white/10">
         {turns.length === 0 && (
           <p className="text-sm text-black/40 dark:text-white/40">Waiting for the conversation to start…</p>
         )}
@@ -293,6 +273,7 @@ export default function SimulatePage({
             {turn.text}
           </div>
         ))}
+        <div ref={transcriptEndRef} />
       </div>
 
       {status !== "ended" && (
@@ -366,7 +347,7 @@ function FeedbackPanel({
   return (
     <div className="flex flex-col gap-5 rounded-lg border border-black/10 p-5 dark:border-white/10">
       <div>
-        <h2 className="text-lg font-semibold">Session feedback</h2>
+        <h2 className="text-lg font-semibold">Simulation Coach debrief</h2>
         <p className="text-sm text-black/60 dark:text-white/60">
           {turnCount} turns · overall {(evaluation.overall_score / 10).toFixed(1)}/10
         </p>
@@ -379,10 +360,13 @@ function FeedbackPanel({
         <ScoreRow label="Hesitation" score={evaluation.hesitation} />
         <ScoreRow label="Task completion" score={evaluation.task_completion} />
         <ScoreRow label="Conversation handling" score={evaluation.conversation_handling} />
+        <ScoreRow label="Handling surprises" score={evaluation.communication_recovery} />
       </div>
       <p className="text-xs text-black/40 dark:text-white/40">
-        Pronunciation isn&apos;t scored yet — that needs real acoustic/phoneme analysis, which
-        this evaluator (working from the text transcript only) can&apos;t honestly provide.
+        &quot;Handling surprises&quot; is about recovering when the conversation didn&apos;t go
+        as expected — clarifying, rephrasing, adapting — not pronunciation. Pronunciation isn&apos;t
+        scored: that needs real acoustic/phoneme analysis, which this evaluator (working from the
+        text transcript only) can&apos;t honestly provide.
       </p>
 
       {evaluation.strengths.length > 0 && (
@@ -409,7 +393,7 @@ function FeedbackPanel({
 
       <div className="flex items-center justify-between border-t border-black/10 pt-4 dark:border-white/10">
         <Link href="/scenarios" className="text-sm underline">
-          Browse all scenarios
+          Browse all missions
         </Link>
         {recommendedScenario && (
           <Link

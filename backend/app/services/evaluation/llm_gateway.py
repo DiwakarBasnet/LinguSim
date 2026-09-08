@@ -8,16 +8,22 @@ from app.config import get_settings
 from app.models.conversation import Transcript
 from app.models.evaluation import EvaluationResult
 from app.models.scenario import Scenario
-from app.services.evaluation.base import Evaluator
-from app.services.evaluation.mock import MockEvaluator
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM_PROMPT = """You are a language-learning coach evaluating a practice conversation.
-You are given the scenario the learner practiced and a full transcript. Assess ONLY what is
-actually present in the transcript text — do not assume anything about pronunciation or audio
-quality, since you were not given any audio; if asked to judge pronunciation you must refuse,
-but you are not asked to here.
+
+class EvaluationFailedError(RuntimeError):
+    pass
+
+_SYSTEM_PROMPT = """You are a simulation coach evaluating a learner's real-time voice simulation —
+not a scripted lesson. The simulation may have thrown unexpected complications at the learner
+mid-conversation (marked below); the whole point is testing whether they can actually survive an
+unpredictable exchange, not just recite a memorized script.
+
+You are given the scenario, which complications (if any) were injected, and a full transcript.
+Assess ONLY what is actually present in the transcript text — do not assume anything about
+pronunciation or audio quality, since you were not given any audio; if asked to judge
+pronunciation you must refuse, but you are not asked to here.
 
 Respond with ONLY a single JSON object (no markdown fences, no commentary) with exactly these
 fields:
@@ -29,6 +35,11 @@ fields:
   "hesitation": <0-100 int, HIGHER = fewer fillers/hesitations/restarts>,
   "task_completion": <0-100 int, how well the learner achieved the scenario's objectives>,
   "conversation_handling": <0-100 int, appropriateness/relevance of the learner's responses>,
+  "communication_recovery": <0-100 int, how well the learner handled being misunderstood,
+    surprised, or hit with an injected complication — clarifying, rephrasing, adapting, and
+    still working toward the original task. If no complication occurred and nothing went
+    unexpectedly, score this on ordinary conversational repair (recovering from any confusion
+    that did come up); if the transcript is too short to tell, score it 50>,
   "weaknesses": [<short strings, prefer the scenario's own grammar/vocabulary theme names>],
   "strengths": [<short strings>]
 }"""
@@ -44,14 +55,18 @@ def _format_transcript(transcript: Transcript) -> str:
     return "\n".join(lines)
 
 
-def _build_user_message(scenario: Scenario, transcript: Transcript) -> str:
+def _build_user_message(scenario: Scenario, transcript: Transcript, complications: list[str]) -> str:
+    complications_line = (
+        "; ".join(complications) if complications else "none — the conversation ran without a scripted complication"
+    )
     return (
         f"Scenario: {scenario.title}\n"
         f"Learner's role: {scenario.learner_role}\n"
         f"Objectives: {'; '.join(scenario.objectives) or 'none listed'}\n"
         f"Success criteria: {'; '.join(scenario.success_criteria) or 'none listed'}\n"
         f"Grammar themes: {', '.join(scenario.grammar_themes) or 'none'}\n"
-        f"Vocabulary themes: {', '.join(scenario.vocabulary_themes) or 'none'}\n\n"
+        f"Vocabulary themes: {', '.join(scenario.vocabulary_themes) or 'none'}\n"
+        f"Complications injected mid-conversation: {complications_line}\n\n"
         f"Transcript:\n{_format_transcript(transcript)}"
     )
 
@@ -67,35 +82,36 @@ def _extract_json(text: str) -> dict:
     return json.loads(match.group(0))
 
 
-class LLMGatewayEvaluator(Evaluator):
+class LLMGatewayEvaluator:
     """
-    Real evaluator using AssemblyAI's LLM Gateway (OpenAI-compatible chat
+    Evaluator using AssemblyAI's LLM Gateway (OpenAI-compatible chat
     completions, same API key as the voice agent). The account this was
     built against only has access to a fast model without native
     response_format/JSON-schema support, so structured output is obtained
     via prompt instructions + best-effort JSON extraction and Pydantic
-    validation, with one retry and a fallback to MockEvaluator if the model
-    output still doesn't parse. If a stronger model with response_format
+    validation, with one retry. If a stronger model with response_format
     support becomes available on the account, prefer that instead.
     """
 
     def __init__(self) -> None:
         self._settings = get_settings()
-        self._fallback = MockEvaluator()
 
-    async def evaluate(self, scenario: Scenario, transcript: Transcript) -> EvaluationResult:
-        user_message = _build_user_message(scenario, transcript)
+    async def evaluate(
+        self, scenario: Scenario, transcript: Transcript, complications: list[str] | None = None
+    ) -> EvaluationResult:
+        user_message = _build_user_message(scenario, transcript, complications or [])
 
+        last_error: Exception | None = None
         for attempt in range(2):
             try:
                 raw = await self._complete(user_message, retry=attempt > 0)
                 data = _extract_json(raw)
                 return EvaluationResult.model_validate(data)
-            except Exception:
+            except Exception as exc:
+                last_error = exc
                 logger.warning("llm_gateway_evaluation_parse_failed", exc_info=True, extra={"context": {"attempt": attempt}})
 
-        logger.error("llm_gateway_evaluation_failed_falling_back_to_mock")
-        return await self._fallback.evaluate(scenario, transcript)
+        raise EvaluationFailedError("LLM Gateway evaluation failed after retry") from last_error
 
     async def _complete(self, user_message: str, retry: bool) -> str:
         messages = [

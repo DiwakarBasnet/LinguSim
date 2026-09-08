@@ -12,15 +12,16 @@ export default async function ProgressPage() {
   return (
     <div className="flex flex-col gap-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Progress</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Journey</h1>
         <p className="mt-1 text-black/60 dark:text-white/60">
-          Grammar, vocabulary, fluency, and hesitation across every completed session.
+          Grammar, vocabulary, fluency, hesitation, and handling surprises across every
+          completed mission.
         </p>
       </div>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div className="rounded-lg border border-black/10 p-4 dark:border-white/10">
-          <div className="text-xs text-black/50 dark:text-white/50">Completed scenarios</div>
+          <div className="text-xs text-black/50 dark:text-white/50">Missions completed</div>
           <div className="mt-1 text-lg font-semibold">{profile.completed_scenarios}</div>
         </div>
         {(["beginner", "intermediate", "advanced"] as const).map((difficulty) => (

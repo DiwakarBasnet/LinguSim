@@ -37,6 +37,7 @@ def _evaluation(overall_score: int) -> EvaluationResult:
         hesitation=overall_score,
         task_completion=overall_score,
         conversation_handling=overall_score,
+        communication_recovery=overall_score,
     )
 
 
@@ -64,7 +65,24 @@ def test_never_recommends_the_scenario_just_played(all_scenarios, order_food):
     assert recommended.id != order_food.id
 
 
-def _synthetic_scenario(id_: str, difficulty: str, grammar_themes: list[str]) -> "Scenario":
+def test_never_recommends_a_different_language(all_scenarios, order_food):
+    # order_food is English; a weak score would otherwise fall back to "any
+    # scenario", which must still exclude every German-language scenario.
+    profile = _profile()
+    recommended = curriculum.recommend_next_scenario(profile, _evaluation(10), order_food, all_scenarios)
+    assert recommended.target_language == "English"
+
+
+def test_german_session_recommends_a_german_scenario(all_scenarios):
+    german_scenario = next(s for s in all_scenarios if s.id == "order_food_de")
+    profile = _profile()
+    recommended = curriculum.recommend_next_scenario(profile, _evaluation(65), german_scenario, all_scenarios)
+    assert recommended.target_language == "German"
+
+
+def _synthetic_scenario(
+    id_: str, difficulty: str, grammar_themes: list[str], possible_events: list[str] | None = None
+) -> "Scenario":
     from app.models.scenario import Scenario
 
     return Scenario(
@@ -77,6 +95,7 @@ def _synthetic_scenario(id_: str, difficulty: str, grammar_themes: list[str]) ->
         learner_role="tester",
         objectives=["do the thing"],
         grammar_themes=grammar_themes,
+        possible_events=possible_events or [],
     )
 
 
@@ -91,3 +110,25 @@ def test_prefers_a_scenario_matching_the_weakest_theme(order_food):
     recommended = curriculum.recommend_next_scenario(profile, _evaluation(65), order_food, candidates)
 
     assert recommended.id == "on_theme"
+
+
+def test_weak_recovery_prefers_more_complication_rich_scenario(order_food):
+    plain = _synthetic_scenario("plain", "beginner", [], possible_events=[])
+    eventful = _synthetic_scenario("eventful", "beginner", [], possible_events=["twist one", "twist two"])
+    candidates = [plain, eventful]
+
+    profile = _profile(communication_recovery=0.2)
+    recommended = curriculum.recommend_next_scenario(profile, _evaluation(65), order_food, candidates)
+
+    assert recommended.id == "eventful"
+
+
+def test_strong_recovery_does_not_force_complication_rich_scenario(order_food):
+    plain = _synthetic_scenario("plain", "beginner", [], possible_events=[])
+    eventful = _synthetic_scenario("eventful", "beginner", [], possible_events=["twist one", "twist two"])
+    candidates = [plain, eventful]
+
+    profile = _profile(communication_recovery=0.9)
+    recommended = curriculum.recommend_next_scenario(profile, _evaluation(65), order_food, candidates)
+
+    assert recommended.id == "plain"  # first candidate in order, untouched by the recovery sort

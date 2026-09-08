@@ -1,5 +1,4 @@
 from functools import lru_cache
-from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -11,14 +10,13 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    voice_agent_provider: Literal["mock", "assemblyai"] = "mock"
+    # AssemblyAI powers both the live voice conversation (Voice Agent API) and
+    # the post-session evaluation (LLM Gateway) — there is no mock/offline mode;
+    # a working ASSEMBLYAI_API_KEY is required for the app to function.
     assemblyai_api_key: str = ""
     assemblyai_ws_url: str = "wss://agents.assemblyai.com/v1/ws"
     assemblyai_voice_id: str = "ivy"
 
-    # AssemblyAI's LLM Gateway (OpenAI-compatible chat completions) — reuses the
-    # same API key. "mock" is a zero-cost heuristic evaluator used by default/tests.
-    evaluation_provider: Literal["mock", "llm_gateway"] = "mock"
     llm_gateway_url: str = "https://llm-gateway.assemblyai.com/v1/chat/completions"
     llm_gateway_model: str = "qwen3.5-4b-32k-fast"
 

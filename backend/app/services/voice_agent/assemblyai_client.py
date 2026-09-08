@@ -24,10 +24,9 @@ class AssemblyAIRelay:
     STT, LLM, and TTS together — PCM16 mono @ 24kHz audio in, PCM16 mono @
     24kHz audio (+ transcript events) back out.
 
-    This deliberately does NOT implement VoiceAgentSession: that interface
-    is call/response per learner turn, which fits the rule-based mock, but
-    AssemblyAI owns turn detection and barge-in itself and pushes events on
-    its own schedule. ws_conversation.py drives this class directly,
+    This is deliberately not a call/response interface: AssemblyAI owns
+    turn detection and barge-in itself and pushes events on its own
+    schedule. ws_conversation.py drives this class directly,
     relaying audio bytes and forwarding normalized events to the browser.
     """
 
@@ -35,10 +34,7 @@ class AssemblyAIRelay:
         self.scenario = scenario
         settings = get_settings()
         if not settings.assemblyai_api_key:
-            raise AssemblyAIRelayError(
-                "ASSEMBLYAI_API_KEY is not set. Add it to .env before using "
-                "VOICE_AGENT_PROVIDER=assemblyai."
-            )
+            raise AssemblyAIRelayError("ASSEMBLYAI_API_KEY is not set. Add it to .env to run LinguSim.")
         self._settings = settings
         self._ws: ClientConnection | None = None
 
@@ -53,18 +49,21 @@ class AssemblyAIRelay:
                     "type": "session.update",
                     "session": {
                         "system_prompt": self.scenario.system_prompt(),
-                        "greeting": f"Hello! {self._opening_hint()}",
                         "output": {"voice": self._settings.assemblyai_voice_id},
                     },
                 }
             )
         )
+        # No scripted "greeting" text: the scenario's objectives/success
+        # criteria are learner-facing instructions, not AI dialogue, and are
+        # already written in the scenario's own target_language — hardcoding
+        # any English framing around them would produce mixed-language
+        # speech for non-English scenarios. Instead, let the model open
+        # in character, in whatever language its system_prompt specifies.
+        await self._ws.send(
+            json.dumps({"type": "reply.create", "instructions": "Open the conversation, in character."})
+        )
         logger.info("assemblyai_session_started", extra={"context": {"scenario_id": self.scenario.id}})
-
-    def _opening_hint(self) -> str:
-        if self.scenario.objectives:
-            return self.scenario.objectives[0]
-        return "Let's get started."
 
     async def send_audio_chunk(self, pcm16_bytes: bytes) -> None:
         if self._ws is None:
@@ -79,6 +78,38 @@ class AssemblyAIRelay:
             return
         await self._ws.send(json.dumps({"type": "conversation.message", "role": "user", "content": text}))
         await self._ws.send(json.dumps({"type": "reply.create"}))
+
+    async def inject_complication(self, description: str) -> None:
+        """
+        Makes the simulation dynamic: pushes a system-level directive mid-
+        conversation (not attributed to the learner) so the AI actively
+        introduces a complication from the scenario's own possible_events
+        into its next reply, in character — rather than just having been
+        told about it once up front and maybe never using it. This is what
+        turns a static scripted scenario into one that reacts to how far
+        the conversation has gotten.
+
+        Deliberately does NOT also send reply.create: AssemblyAI already
+        auto-generates a reply after every learner turn on its own, and an
+        explicit reply.create issued around the same moment races it —
+        confirmed live, it produces two garbled, partially-overlapping
+        replies instead of one that naturally works the complication in.
+        Letting the already-pending/next natural reply pick this up avoids
+        that entirely, at the cost of it occasionally landing one turn
+        later than the trigger — an acceptable trade for a hackathon-scale
+        feature.
+        """
+        if self._ws is None:
+            return
+        await self._ws.send(
+            json.dumps(
+                {
+                    "type": "conversation.message",
+                    "role": "system",
+                    "content": f"Complication to introduce naturally in your next reply, in character: {description}",
+                }
+            )
+        )
 
     async def events(self) -> AsyncIterator[dict[str, Any]]:
         """

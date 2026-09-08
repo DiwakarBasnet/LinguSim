@@ -43,6 +43,9 @@ export interface EvaluationResult {
   hesitation: number;
   task_completion: number;
   conversation_handling: number;
+  // Recovering when misunderstood, surprised, or hit with a mid-simulation
+  // complication: clarifying, rephrasing, adapting, still finishing the task.
+  communication_recovery: number;
   weaknesses: string[];
   strengths: string[];
 }
@@ -54,6 +57,7 @@ export interface LearnerProfile {
   vocabulary: Record<string, number>;
   fluency: number | null;
   hesitation: number | null;
+  communication_recovery: number | null;
   // Never populated: evaluation only ever sees a text transcript, which
   // carries no phoneme/acoustic signal — see backend LearnerProfileRecord.
   pronunciation: number | null;
@@ -69,6 +73,11 @@ export interface SessionSummary {
   difficulty: Difficulty;
   evaluation: EvaluationResult;
   created_at: string;
+}
+
+export interface ComplicationEvent {
+  type: "complication";
+  text: string;
 }
 
 export interface SessionEndPayload {

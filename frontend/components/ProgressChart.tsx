@@ -3,15 +3,16 @@
 import { useMemo, useState } from "react";
 import type { SessionSummary } from "@/lib/types";
 
-// Categorical palette, slots 1-5 (blue/orange/aqua/yellow/magenta) — this
-// order passes the adjacent-pair CVD/contrast validator for line charts.
-// Source: dataviz skill's references/palette.md.
+// Categorical palette, slots 1-6 (blue/orange/aqua/yellow/magenta/green) —
+// this order passes the adjacent-pair CVD/contrast validator for line
+// charts. Source: dataviz skill's references/palette.md.
 const SERIES = [
   { key: "overall_score", label: "Overall", light: "#2a78d6", dark: "#3987e5" },
   { key: "grammar", label: "Grammar", light: "#eb6834", dark: "#d95926" },
   { key: "vocabulary", label: "Vocabulary", light: "#1baf7a", dark: "#199e70" },
   { key: "fluency", label: "Fluency", light: "#eda100", dark: "#c98500" },
   { key: "hesitation", label: "Hesitation", light: "#e87ba4", dark: "#d55181" },
+  { key: "communication_recovery", label: "Handling surprises", light: "#008300", dark: "#008300" },
 ] as const;
 
 const WIDTH = 640;
@@ -42,6 +43,7 @@ export default function ProgressChart({ sessions }: { sessions: SessionSummary[]
         vocabulary: s.evaluation.vocabulary,
         fluency: s.evaluation.fluency,
         hesitation: s.evaluation.hesitation,
+        communication_recovery: s.evaluation.communication_recovery,
       })),
     [sessions]
   );
@@ -197,7 +199,7 @@ export default function ProgressChart({ sessions }: { sessions: SessionSummary[]
             <thead>
               <tr className="text-black/50 dark:text-white/50">
                 <th className="py-1 pr-3">Date</th>
-                <th className="py-1 pr-3">Scenario</th>
+                <th className="py-1 pr-3">Mission</th>
                 {SERIES.map((s) => (
                   <th key={s.key} className="py-1 pr-3">
                     {s.label}

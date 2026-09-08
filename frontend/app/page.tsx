@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { fetchProfile, fetchScenario, fetchSessions } from "@/lib/api";
 import { computeStreak, overallScoreTrend, topWeaknesses } from "@/lib/dashboard";
+import ResetDataButton from "@/components/ResetDataButton";
 
 export default async function DashboardPage() {
   const [profile, sessions] = await Promise.all([fetchProfile(), fetchSessions()]);
@@ -12,15 +13,15 @@ export default async function DashboardPage() {
         <div className="rounded-lg border border-black/10 p-6 dark:border-white/10">
           <h2 className="font-medium">No sessions yet</h2>
           <p className="mt-1 text-sm text-black/60 dark:text-white/60">
-            Your grammar, vocabulary, and fluency profile builds up after your first
-            scenario. Weaknesses and a recommended next scenario will show up here
-            once you have practice history.
+            Your grammar, vocabulary, fluency, and ability to recover when a conversation
+            surprises you all build up after your first mission. Weaknesses and a recommended
+            next mission will show up here once you have practice history.
           </p>
           <Link
             href="/scenarios"
             className="mt-4 inline-block rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-black/80 dark:bg-white dark:text-black dark:hover:bg-white/80"
           >
-            Start a scenario
+            Start a mission
           </Link>
         </div>
       </div>
@@ -43,7 +44,7 @@ export default async function DashboardPage() {
         <Stat label="Target language" value={profile.target_language} />
         <Stat label="Level" value={profile.level} />
         <Stat label="Streak" value={`${streak} day${streak === 1 ? "" : "s"}`} />
-        <Stat label="Scenarios completed" value={String(profile.completed_scenarios)} />
+        <Stat label="Missions completed" value={String(profile.completed_scenarios)} />
       </div>
 
       {trend.length > 0 && (
@@ -53,7 +54,7 @@ export default async function DashboardPage() {
           </h2>
           <p className="mt-2 font-mono text-sm">{trend.join("% → ")}%</p>
           <Link href="/progress" className="mt-2 inline-block text-sm underline">
-            View full progress
+            View full journey
           </Link>
         </div>
       )}
@@ -102,14 +103,14 @@ export default async function DashboardPage() {
             Recommended next
           </h2>
           <p className="mt-1 text-sm">
-            {recommended ? recommended.title : "Pick any scenario to keep going."}
+            {recommended ? recommended.title : "Pick any mission to keep going."}
           </p>
         </div>
         <Link
           href={recommended ? `/simulate/${recommended.id}` : "/scenarios"}
           className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-black/80 dark:bg-white dark:text-black dark:hover:bg-white/80"
         >
-          Start scenario
+          Start mission
         </Link>
       </div>
     </div>
@@ -118,11 +119,15 @@ export default async function DashboardPage() {
 
 function Header() {
   return (
-    <div>
-      <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-      <p className="mt-1 text-black/60 dark:text-white/60">
-        Practice a real-world scenario, get evaluated, and see what to work on next.
-      </p>
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+        <p className="mt-1 text-black/60 dark:text-white/60">
+          Survive a real-world mission, then your Simulation Coach tells you what actually
+          happened and what to work on next.
+        </p>
+      </div>
+      <ResetDataButton />
     </div>
   );
 }

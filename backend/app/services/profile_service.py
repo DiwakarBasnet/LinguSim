@@ -52,6 +52,9 @@ def update_profile_from_evaluation(
 
     profile.fluency = _ema(profile.fluency, evaluation.fluency / 100)
     profile.hesitation = _ema(profile.hesitation, evaluation.hesitation / 100)
+    profile.communication_recovery = _ema(
+        profile.communication_recovery, evaluation.communication_recovery / 100
+    )
     profile.completed_scenarios += 1
     profile.target_language = scenario.target_language
     # pronunciation is never set here — see LearnerProfileRecord docstring.
@@ -76,6 +79,7 @@ def profile_to_dict(profile: LearnerProfileRecord) -> dict:
         "vocabulary": profile.vocabulary,
         "fluency": profile.fluency,
         "hesitation": profile.hesitation,
+        "communication_recovery": profile.communication_recovery,
         "pronunciation": None,  # not assessed — see LearnerProfileRecord docstring
         "completed_scenarios": profile.completed_scenarios,
         "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,

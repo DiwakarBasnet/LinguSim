@@ -30,10 +30,19 @@ class Scenario(BaseModel):
     difficulty_modifiers: list[DifficultyModifier] = Field(default_factory=list)
 
     def system_prompt(self) -> str:
-        """Context handed to the conversation partner (mock or real LLM) — not a script."""
+        """
+        Context handed to the conversation partner (real LLM) — not a script.
+        These instructions are always written in English (so scenario authors
+        and the Scenario Selection UI stay readable regardless of the
+        scenario's target_language), but the conversation itself must happen
+        in target_language — so that's stated explicitly rather than left to
+        be inferred from the instruction language.
+        """
         lines = [
             f"You are role-playing as {self.ai_role} in a {self.target_language} language-practice "
             f"scenario called '{self.title}'.",
+            f"Conduct the ENTIRE conversation in {self.target_language} — every line you speak must "
+            f"be in {self.target_language}, even though these instructions are written in English.",
             f"The learner is playing: {self.learner_role}.",
             f"Scenario: {self.description}",
         ]

@@ -33,6 +33,7 @@ def _evaluation(**overrides) -> EvaluationResult:
         hesitation=90,
         task_completion=100,
         conversation_handling=70,
+        communication_recovery=65,
         weaknesses=[],
         strengths=[],
     )
@@ -67,6 +68,7 @@ def test_update_profile_applies_theme_scores_and_increments_count(db, scenario):
         assert profile.vocabulary[theme] == pytest.approx(0.6)
     assert profile.fluency == pytest.approx(0.75)
     assert profile.hesitation == pytest.approx(0.9)
+    assert profile.communication_recovery == pytest.approx(0.65)
     assert profile.completed_scenarios == 1
 
 

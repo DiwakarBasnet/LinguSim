@@ -7,7 +7,7 @@ from app.db.models import SessionRecord
 from app.models.conversation import Transcript
 from app.models.scenario import Scenario
 from app.services import curriculum, profile_service
-from app.services.evaluation import Evaluator
+from app.services.evaluation import LLMGatewayEvaluator
 from app.services.scenario_loader import ScenarioLoader
 
 logger = logging.getLogger(__name__)
@@ -17,13 +17,16 @@ class SessionService:
     """Persists a finished session, evaluates it, and updates the learner
     profile + next-scenario recommendation in one place."""
 
-    def __init__(self, db: Session, evaluator: Evaluator, scenario_loader: ScenarioLoader):
+    def __init__(self, db: Session, evaluator: LLMGatewayEvaluator, scenario_loader: ScenarioLoader):
         self.db = db
         self.evaluator = evaluator
         self.scenario_loader = scenario_loader
 
-    async def finish_session(self, scenario: Scenario, transcript: Transcript) -> dict:
-        evaluation = await self.evaluator.evaluate(scenario, transcript)
+    async def finish_session(
+        self, scenario: Scenario, transcript: Transcript, complications: list[str] | None = None
+    ) -> dict:
+        complications = complications or []
+        evaluation = await self.evaluator.evaluate(scenario, transcript, complications)
 
         record = SessionRecord(
             id=uuid4().hex,
@@ -32,6 +35,7 @@ class SessionService:
             difficulty=scenario.difficulty,
             transcript=[turn.model_dump() for turn in transcript.turns],
             evaluation=evaluation.model_dump(),
+            complications=complications,
         )
         self.db.add(record)
 

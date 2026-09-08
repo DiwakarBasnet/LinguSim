@@ -1,8 +1,8 @@
 import pytest
 
 from app.models.conversation import Transcript
-from app.services.evaluation.llm_gateway import _extract_json
-from app.services.evaluation.mock import MockEvaluator
+from app.services.evaluation import EvaluationFailedError, LLMGatewayEvaluator
+from app.services.evaluation.llm_gateway import _build_user_message, _extract_json
 from app.services.scenario_loader import ScenarioLoader
 
 
@@ -16,23 +16,7 @@ def transcript(scenario):
     t = Transcript(scenario_id=scenario.id)
     t.add("ai", "Hello! What can I get for you?")
     t.add("learner", "I would like a coffee and a croissant please, thank you very much.")
-    t.add("ai", "Coming right up.")
-    t.add("learner", "Great, thanks.")
     return t
-
-
-async def test_mock_evaluator_produces_valid_result(scenario, transcript):
-    result = await MockEvaluator().evaluate(scenario, transcript)
-    for field in ("overall_score", "grammar", "vocabulary", "fluency", "hesitation", "task_completion", "conversation_handling"):
-        value = getattr(result, field)
-        assert 0 <= value <= 100
-
-
-async def test_mock_evaluator_handles_empty_transcript(scenario):
-    empty = Transcript(scenario_id=scenario.id)
-    result = await MockEvaluator().evaluate(scenario, empty)
-    assert result.task_completion == 0
-    assert result.conversation_handling == 30
 
 
 def test_extract_json_plain():
@@ -52,3 +36,49 @@ def test_extract_json_with_surrounding_prose():
 def test_extract_json_raises_when_no_object_present():
     with pytest.raises(ValueError):
         _extract_json("no json here")
+
+
+def test_user_message_mentions_injected_complications(scenario, transcript):
+    message = _build_user_message(scenario, transcript, ["The item is sold out"])
+    assert "The item is sold out" in message
+
+
+def test_user_message_notes_when_no_complication_occurred(scenario, transcript):
+    message = _build_user_message(scenario, transcript, [])
+    assert "none" in message.lower()
+
+
+VALID_RESULT_JSON = (
+    '{"overall_score": 70, "grammar": 70, "vocabulary": 70, "fluency": 70, '
+    '"hesitation": 70, "task_completion": 70, "conversation_handling": 70, '
+    '"communication_recovery": 70, "weaknesses": [], "strengths": []}'
+)
+
+
+async def test_llm_gateway_evaluator_retries_once_on_malformed_output(
+    scenario, transcript, monkeypatch: pytest.MonkeyPatch
+):
+    calls = []
+
+    async def fake_complete(self, user_message, retry):
+        calls.append(retry)
+        return "not json at all" if not retry else VALID_RESULT_JSON
+
+    monkeypatch.setattr(LLMGatewayEvaluator, "_complete", fake_complete)
+
+    result = await LLMGatewayEvaluator().evaluate(scenario, transcript)
+
+    assert calls == [False, True]
+    assert result.overall_score == 70
+
+
+async def test_llm_gateway_evaluator_raises_after_two_failed_attempts(
+    scenario, transcript, monkeypatch: pytest.MonkeyPatch
+):
+    async def fake_complete(self, user_message, retry):
+        return "still not json"
+
+    monkeypatch.setattr(LLMGatewayEvaluator, "_complete", fake_complete)
+
+    with pytest.raises(EvaluationFailedError):
+        await LLMGatewayEvaluator().evaluate(scenario, transcript)

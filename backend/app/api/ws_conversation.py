@@ -4,80 +4,87 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.config import get_settings
 from app.db.session import create_session
 from app.models.conversation import Transcript, Turn
 from app.models.scenario import Scenario
-from app.services.conversation_manager import ConversationManager
-from app.services.evaluation import create_evaluator
+from app.services.evaluation import LLMGatewayEvaluator
 from app.services.scenario_loader import ScenarioNotFoundError, get_scenario_loader
 from app.services.session_service import SessionService
-from app.services.voice_agent.assemblyai_client import AssemblyAIRelay, AssemblyAIRelayError
+from app.services.voice_agent import AssemblyAIRelay, AssemblyAIRelayError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["conversation"])
 
+# Trigger one new complication every this-many learner turns, up to however
+# many the scenario defines (see maybe_inject_complication below).
+COMPLICATION_TURN_INTERVAL = 2
+
 
 @router.websocket("/ws/conversation")
 async def conversation_ws(websocket: WebSocket) -> None:
     """
-    Text + binary protocol. The text (JSON) messages are the same regardless
-    of provider; binary frames only apply to the "assemblyai" provider,
-    which streams raw PCM16 mono @ 24kHz audio in both directions.
+    Text + binary protocol, backed by AssemblyAI's Voice Agent API — one
+    managed session streaming raw PCM16 mono @ 24kHz audio in both
+    directions alongside JSON transcript/control events.
 
     client -> server:
       {"type": "start", "scenario_id": "order_food"}
-      {"type": "user_text", "text": "..."}      # typed fallback, both providers
+      {"type": "user_text", "text": "..."}      # typed fallback
       {"type": "end"}
-      <binary PCM16 24kHz mono frame>            # mic audio, assemblyai only
+      <binary PCM16 24kHz mono frame>            # mic audio
 
     server -> client:
-      {"type": "session_ready", "mode": "mock" | "assemblyai"}
+      {"type": "session_ready"}
       {"type": "agent_text", "text": "...", "turn_index": N}
-      {"type": "user_transcript", "text": "...", "turn_index": N}   # assemblyai only
-      {"type": "clear_audio"}                    # assemblyai only: barge-in, stop playback
+      {"type": "user_transcript", "text": "...", "turn_index": N}
+      {"type": "clear_audio"}                    # barge-in: stop playback
+      {"type": "complication", "text": "..."}     # a scripted complication just fired
       {"type": "session_end", "transcript": {...}, "evaluation": {...},
        "profile": {...}, "recommended_scenario_id": "..."}
       {"type": "error", "message": "..."}
-      <binary PCM16 24kHz mono frame>            # agent reply audio, assemblyai only
+      <binary PCM16 24kHz mono frame>            # agent reply audio
     """
     await websocket.accept()
-    settings = get_settings()
     loader = get_scenario_loader()
 
-    manager: ConversationManager | None = None
     relay: AssemblyAIRelay | None = None
     relay_task: asyncio.Task | None = None
     scenario: Scenario | None = None
-    relay_turns: list[dict] = []
+    turns: list[dict] = []
+    complications_triggered: list[str] = []
 
-    async def finish_and_report(transcript: Transcript) -> None:
-        assert scenario is not None
-        db = create_session()
-        try:
-            evaluator = create_evaluator(settings.evaluation_provider)
-            service = SessionService(db, evaluator, loader)
-            result = await service.finish_session(scenario, transcript)
-        except Exception:
-            logger.exception("session_finish_failed")
-            await websocket.send_json(
-                {"type": "session_end", "transcript": transcript.model_dump(), "error": "Evaluation failed."}
-            )
+    async def maybe_inject_complication() -> None:
+        """
+        What makes a simulation dynamic instead of a fixed script: every
+        COMPLICATION_TURN_INTERVAL learner turns, actively push the next
+        unused possible_events entry into the live conversation (see
+        AssemblyAIRelay.inject_complication) rather than just hoping the
+        model picks one up from the system prompt on its own.
+        """
+        assert scenario is not None and relay is not None
+        if len(complications_triggered) >= len(scenario.possible_events):
             return
-        finally:
-            db.close()
-        await websocket.send_json({"type": "session_end", "transcript": transcript.model_dump(), **result})
+        learner_turns = sum(1 for t in turns if t["speaker"] == "learner")
+        due = learner_turns // COMPLICATION_TURN_INTERVAL
+        if due <= len(complications_triggered):
+            return
+        event = scenario.possible_events[len(complications_triggered)]
+        complications_triggered.append(event)
+        await relay.inject_complication(event)
+        await websocket.send_json({"type": "complication", "text": event})
 
     async def pump_relay_events(active_relay: AssemblyAIRelay) -> None:
         try:
             async for event in active_relay.events():
                 etype = event["type"]
                 if etype in ("agent_text", "user_transcript"):
-                    turn_index = len(relay_turns)
+                    turn_index = len(turns)
                     speaker = "ai" if etype == "agent_text" else "learner"
-                    relay_turns.append({"turn_index": turn_index, "speaker": speaker, "text": event["text"]})
+                    turns.append({"turn_index": turn_index, "speaker": speaker, "text": event["text"]})
                     await websocket.send_json({"type": etype, "text": event["text"], "turn_index": turn_index})
+                    if speaker == "learner":
+                        await maybe_inject_complication()
                 elif etype == "agent_audio":
                     await websocket.send_bytes(event["data"])
                 elif etype == "clear_audio":
@@ -92,6 +99,23 @@ async def conversation_ws(websocket: WebSocket) -> None:
                 await websocket.send_json({"type": "error", "message": "Voice agent connection failed."})
             except Exception:
                 pass
+
+    async def finish_and_report() -> None:
+        assert scenario is not None
+        transcript = Transcript(scenario_id=scenario.id, turns=[Turn(**t) for t in turns])
+        db = create_session()
+        try:
+            service = SessionService(db, LLMGatewayEvaluator(), loader)
+            result = await service.finish_session(scenario, transcript, complications_triggered)
+        except Exception:
+            logger.exception("session_finish_failed")
+            await websocket.send_json(
+                {"type": "session_end", "transcript": transcript.model_dump(), "error": "Evaluation failed."}
+            )
+            return
+        finally:
+            db.close()
+        await websocket.send_json({"type": "session_end", "transcript": transcript.model_dump(), **result})
 
     try:
         while True:
@@ -117,58 +141,44 @@ async def conversation_ws(websocket: WebSocket) -> None:
                     )
                     continue
 
-                if settings.voice_agent_provider == "assemblyai":
-                    try:
-                        relay = AssemblyAIRelay(scenario)
-                        await relay.connect()
-                    except AssemblyAIRelayError as exc:
-                        await websocket.send_json({"type": "error", "message": str(exc)})
-                        relay = None
-                        continue
-                    await websocket.send_json({"type": "session_ready", "mode": "assemblyai"})
-                    relay_task = asyncio.create_task(pump_relay_events(relay))
-                else:
-                    manager = ConversationManager(scenario, provider=settings.voice_agent_provider)
-                    await websocket.send_json({"type": "session_ready", "mode": "mock"})
-                    opening_line = await manager.start()
-                    await websocket.send_json({"type": "agent_text", "text": opening_line, "turn_index": 0})
+                try:
+                    relay = AssemblyAIRelay(scenario)
+                    await relay.connect()
+                except AssemblyAIRelayError as exc:
+                    await websocket.send_json({"type": "error", "message": str(exc)})
+                    relay = None
+                    scenario = None
+                    continue
+                await websocket.send_json({"type": "session_ready"})
+                relay_task = asyncio.create_task(pump_relay_events(relay))
 
             elif msg_type == "user_text":
                 text = message.get("text", "")
-                if relay is not None:
-                    turn_index = len(relay_turns)
-                    relay_turns.append({"turn_index": turn_index, "speaker": "learner", "text": text})
-                    await relay.send_user_text(text)
-                elif manager is not None:
-                    reply = await manager.handle_learner_text(text)
-                    await websocket.send_json(
-                        {"type": "agent_text", "text": reply, "turn_index": len(manager.transcript.turns) - 1}
-                    )
-                else:
+                if relay is None:
                     await websocket.send_json(
                         {"type": "error", "message": "Send a 'start' message before 'user_text'."}
                     )
+                    continue
+                turn_index = len(turns)
+                turns.append({"turn_index": turn_index, "speaker": "learner", "text": text})
+                # Inject any due complication into context BEFORE the reply
+                # this triggers, so the one reply it generates can naturally
+                # work it in, rather than racing a second reply against it.
+                await maybe_inject_complication()
+                await relay.send_user_text(text)
 
             elif msg_type == "end":
-                if scenario is None:
+                if scenario is None or relay is None:
                     await websocket.send_json({"type": "session_end", "transcript": {"scenario_id": None, "turns": []}})
                     break
-                if relay is not None:
-                    await relay.end()
-                    if relay_task is not None:
-                        try:
-                            await asyncio.wait_for(relay_task, timeout=5)
-                        except (TimeoutError, asyncio.CancelledError):
-                            pass
-                    await relay.close()
-                    transcript = Transcript(
-                        scenario_id=scenario.id if scenario else "",
-                        turns=[Turn(**turn) for turn in relay_turns],
-                    )
-                    await finish_and_report(transcript)
-                elif manager is not None:
-                    transcript = await manager.end()
-                    await finish_and_report(transcript)
+                await relay.end()
+                if relay_task is not None:
+                    try:
+                        await asyncio.wait_for(relay_task, timeout=5)
+                    except (TimeoutError, asyncio.CancelledError):
+                        pass
+                await relay.close()
+                await finish_and_report()
                 break
 
             else:
@@ -181,3 +191,11 @@ async def conversation_ws(websocket: WebSocket) -> None:
             relay_task.cancel()
         if relay is not None:
             await relay.close()
+        # Without an explicit close, the connection is simply abandoned once
+        # this handler returns — no WebSocket close frame is ever sent, and
+        # browsers surface that as a connection error even though session_end
+        # already arrived successfully.
+        try:
+            await websocket.close()
+        except Exception:
+            pass

@@ -1,10 +1,9 @@
 /**
- * Raw PCM16 mono audio capture/playback for the real AssemblyAI Voice Agent
- * path. AssemblyAI's managed pipeline (wss://agents.assemblyai.com/v1/ws,
- * proxied through our backend) speaks PCM16 mono @ 24kHz in both
- * directions, sent/received as binary WebSocket frames — no separate STT/TTS
- * calls on our side. This is unrelated to lib/speech.ts, which is only used
- * for the mock provider.
+ * Raw PCM16 mono audio capture/playback for the AssemblyAI Voice Agent path.
+ * AssemblyAI's managed pipeline (wss://agents.assemblyai.com/v1/ws, proxied
+ * through our backend) speaks PCM16 mono @ 24kHz in both directions,
+ * sent/received as binary WebSocket frames — no separate STT/TTS calls on
+ * our side.
  */
 
 export const VOICE_AGENT_SAMPLE_RATE = 24000;
