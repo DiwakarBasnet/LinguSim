@@ -35,6 +35,9 @@ export default function SimulatePage({
   const [recommendedScenario, setRecommendedScenario] = useState<Scenario | null>(null);
   const [endRequested, setEndRequested] = useState(false);
   const [latestComplication, setLatestComplication] = useState<string | null>(null);
+  const [latestHint, setLatestHint] = useState<{ term: string; translation: string; level: number } | null>(
+    null,
+  );
 
   const socketRef = useRef<WebSocket | null>(null);
   const micHandleRef = useRef<MicStreamHandle | null>(null);
@@ -115,6 +118,8 @@ export default function SimulatePage({
         setAiSpeaking(false);
       } else if (message.type === "complication") {
         setLatestComplication(message.text);
+      } else if (message.type === "hint") {
+        setLatestHint({ term: message.term, translation: message.translation, level: message.level });
       } else if (message.type === "session_end") {
         const payload = message as SessionEndPayload;
         setFinalTranscript(payload.transcript);
@@ -128,12 +133,20 @@ export default function SimulatePage({
         }
       } else if (message.type === "error") {
         setErrorMessage(message.message);
+        // A protocol error before the session even started (e.g. an unknown
+        // scenario id) is recoverable by just retrying; an error once the
+        // session is live means the voice-agent connection is broken and
+        // nothing further will work, so stop pretending the UI is usable.
+        // teardownAudio() is a safe no-op if the mic was never armed.
+        setStatus((prev) => (prev === "connecting" || prev === "in_progress" ? "error" : prev));
+        teardownAudio();
       }
     };
 
     socket.onerror = () => {
-      setStatus("error");
+      setStatus((prev) => (prev === "ended" ? prev : "error"));
       setErrorMessage("Connection to the backend was lost.");
+      teardownAudio();
     };
 
     return () => {
@@ -199,7 +212,7 @@ export default function SimulatePage({
     );
   }
 
-  const needsMicArm = !micArmed && status !== "ended";
+  const needsMicArm = !micArmed && status !== "ended" && status !== "error";
 
   return (
     <div className="flex flex-col gap-6">
@@ -236,6 +249,12 @@ export default function SimulatePage({
       {latestComplication && status === "in_progress" && (
         <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-400">
           ⚡ Things just changed: {latestComplication}
+        </p>
+      )}
+
+      {latestHint && status === "in_progress" && (
+        <p className="rounded-md border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-700 dark:text-sky-400">
+          💡 Hint (level {latestHint.level}) — &ldquo;{latestHint.term}&rdquo; → {latestHint.translation}
         </p>
       )}
 
@@ -276,7 +295,7 @@ export default function SimulatePage({
         <div ref={transcriptEndRef} />
       </div>
 
-      {status !== "ended" && (
+      {status !== "ended" && status !== "error" && (
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -308,8 +327,29 @@ export default function SimulatePage({
         </form>
       )}
 
+      {status === "error" && (
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-black/80 dark:bg-white dark:text-black dark:hover:bg-white/80"
+          >
+            Retry this mission
+          </button>
+          <Link href="/scenarios" className="rounded-md border border-black/10 px-4 py-2 text-sm dark:border-white/10">
+            Back to missions
+          </Link>
+        </div>
+      )}
+
       {status === "ended" && endRequested && !evaluation && !errorMessage && (
         <p className="text-sm text-black/60 dark:text-white/60">Evaluating your conversation…</p>
+      )}
+
+      {status === "ended" && !evaluation && errorMessage && (
+        <Link href="/scenarios" className="text-sm underline">
+          Back to missions
+        </Link>
       )}
 
       {status === "ended" && evaluation && (

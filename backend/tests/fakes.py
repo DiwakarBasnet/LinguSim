@@ -6,6 +6,7 @@ unit tests" requirement)."""
 from collections.abc import AsyncIterator
 from typing import Any
 
+from app.db.models import LearnerProfileRecord
 from app.models.conversation import Transcript
 from app.models.evaluation import EvaluationResult
 from app.models.scenario import Scenario
@@ -43,7 +44,12 @@ class FakeEvaluator:
     """Stands in for LLMGatewayEvaluator: fixed, valid EvaluationResult, no network."""
 
     async def evaluate(
-        self, scenario: Scenario, transcript: Transcript, complications: list[str] | None = None
+        self,
+        scenario: Scenario,
+        transcript: Transcript,
+        complications: list[str] | None = None,
+        learner_profile: LearnerProfileRecord | None = None,
+        scenario_bank: list[Scenario] | None = None,
     ) -> EvaluationResult:
         return EvaluationResult(
             overall_score=70,

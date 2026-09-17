@@ -1,5 +1,6 @@
 import { fetchScenarios } from "@/lib/api";
 import ScenarioBrowser from "@/components/ScenarioBrowser";
+import LoadErrorBanner from "@/components/LoadErrorBanner";
 import type { Scenario } from "@/lib/types";
 
 export default async function ScenariosPage() {
@@ -8,7 +9,7 @@ export default async function ScenariosPage() {
   try {
     scenarios = await fetchScenarios();
   } catch {
-    loadError = "Couldn't reach the backend. Is it running on the expected port?";
+    loadError = "Couldn't load missions.";
   }
 
   return (
@@ -21,13 +22,7 @@ export default async function ScenariosPage() {
         </p>
       </div>
 
-      {loadError ? (
-        <p className="rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
-          {loadError}
-        </p>
-      ) : (
-        <ScenarioBrowser scenarios={scenarios} />
-      )}
+      {loadError ? <LoadErrorBanner message={loadError} /> : <ScenarioBrowser scenarios={scenarios} />}
     </div>
   );
 }

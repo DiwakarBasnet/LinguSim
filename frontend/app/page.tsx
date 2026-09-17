@@ -2,9 +2,22 @@ import Link from "next/link";
 import { fetchProfile, fetchScenario, fetchSessions } from "@/lib/api";
 import { computeStreak, overallScoreTrend, topWeaknesses } from "@/lib/dashboard";
 import ResetDataButton from "@/components/ResetDataButton";
+import LoadErrorBanner from "@/components/LoadErrorBanner";
+import type { LearnerProfile, SessionSummary } from "@/lib/types";
 
 export default async function DashboardPage() {
-  const [profile, sessions] = await Promise.all([fetchProfile(), fetchSessions()]);
+  let profile: LearnerProfile;
+  let sessions: SessionSummary[];
+  try {
+    [profile, sessions] = await Promise.all([fetchProfile(), fetchSessions()]);
+  } catch {
+    return (
+      <div className="flex flex-col gap-8">
+        <Header />
+        <LoadErrorBanner message="Couldn't load your profile." />
+      </div>
+    );
+  }
 
   if (profile.completed_scenarios === 0) {
     return (

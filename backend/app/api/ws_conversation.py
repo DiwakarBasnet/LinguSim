@@ -40,6 +40,7 @@ async def conversation_ws(websocket: WebSocket) -> None:
       {"type": "user_transcript", "text": "...", "turn_index": N}
       {"type": "clear_audio"}                    # barge-in: stop playback
       {"type": "complication", "text": "..."}     # a scripted complication just fired
+      {"type": "hint", "term": "...", "translation": "...", "level": 2 | 3}
       {"type": "session_end", "transcript": {...}, "evaluation": {...},
        "profile": {...}, "recommended_scenario_id": "..."}
       {"type": "error", "message": "..."}
@@ -89,6 +90,15 @@ async def conversation_ws(websocket: WebSocket) -> None:
                     await websocket.send_bytes(event["data"])
                 elif etype == "clear_audio":
                     await websocket.send_json({"type": "clear_audio"})
+                elif etype == "hint":
+                    await websocket.send_json(
+                        {
+                            "type": "hint",
+                            "term": event["term"],
+                            "translation": event["translation"],
+                            "level": event["level"],
+                        }
+                    )
                 elif etype == "error":
                     await websocket.send_json({"type": "error", "message": event["message"]})
                 elif etype == "ended":
@@ -186,6 +196,17 @@ async def conversation_ws(websocket: WebSocket) -> None:
 
     except WebSocketDisconnect:
         logger.info("conversation_ws_disconnected")
+    except Exception:
+        # Anything unexpected here (e.g. AssemblyAI dropping mid-session) —
+        # tell the client something broke instead of just going silent;
+        # cleanup still runs below regardless.
+        logger.exception("conversation_ws_failed")
+        try:
+            await websocket.send_json(
+                {"type": "error", "message": "Something went wrong with the live session."}
+            )
+        except Exception:
+            pass
     finally:
         if relay_task is not None and not relay_task.done():
             relay_task.cancel()

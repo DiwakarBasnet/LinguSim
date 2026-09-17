@@ -26,7 +26,18 @@ class SessionService:
         self, scenario: Scenario, transcript: Transcript, complications: list[str] | None = None
     ) -> dict:
         complications = complications or []
-        evaluation = await self.evaluator.evaluate(scenario, transcript, complications)
+
+        # Fetched before evaluation (read-only at this point) so the
+        # evaluator agent's read_learner_profile/propose_next_scenario
+        # tools can see the learner's *pre-session* standing — this same
+        # object then gets the normal EMA update below, unchanged from
+        # before.
+        profile = profile_service.get_or_create_profile(self.db, scenario.target_language)
+        scenario_bank = self.scenario_loader.list()
+
+        evaluation = await self.evaluator.evaluate(
+            scenario, transcript, complications, learner_profile=profile, scenario_bank=scenario_bank
+        )
 
         record = SessionRecord(
             id=uuid4().hex,
@@ -39,12 +50,9 @@ class SessionService:
         )
         self.db.add(record)
 
-        profile = profile_service.get_or_create_profile(self.db, scenario.target_language)
         profile = profile_service.update_profile_from_evaluation(self.db, profile, scenario, evaluation)
 
-        recommended = curriculum.recommend_next_scenario(
-            profile, evaluation, scenario, self.scenario_loader.list()
-        )
+        recommended = curriculum.recommend_next_scenario(profile, evaluation, scenario, scenario_bank)
 
         self.db.commit()
         logger.info(

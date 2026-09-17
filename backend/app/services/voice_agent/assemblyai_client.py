@@ -1,16 +1,43 @@
 import base64
 import json
 import logging
+import mcp
+import websockets
+from websockets.asyncio.client import ClientConnection
 from collections.abc import AsyncIterator
 from typing import Any
 
-import websockets
-from websockets.asyncio.client import ClientConnection
-
 from app.config import get_settings
 from app.models.scenario import Scenario
+from app.services.dictionary_mcp import dictionary_server
 
 logger = logging.getLogger(__name__)
+
+_HINT_TOOL_NAME = "get_translation_hint"
+_HINT_TOOLS = [
+    {
+        "type": "function",
+        "name": _HINT_TOOL_NAME,
+        "description": (
+            "Look up a real translation for a word or short phrase the learner is stuck on, "
+            "so a hint can be grounded in an actual translation instead of a guess. Only call "
+            "this for Level 2 (partial hint) or Level 3 (target phrase) hints, per the hint "
+            "system in your instructions — never proactively."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "term": {
+                    "type": "string",
+                    "description": "The English word (level 2) or full phrase (level 3) to translate.",
+                },
+            },
+            "required": ["term"],
+        },
+        "execution_mode": "interactive",
+        "timeout_seconds": 8,
+    }
+]
 
 
 class AssemblyAIRelayError(RuntimeError):
@@ -19,15 +46,8 @@ class AssemblyAIRelayError(RuntimeError):
 
 class AssemblyAIRelay:
     """
-    Duplex bridge to AssemblyAI's managed Voice Agent API
-    (wss://agents.assemblyai.com/v1/ws): one WebSocket session that handles
-    STT, LLM, and TTS together — PCM16 mono @ 24kHz audio in, PCM16 mono @
-    24kHz audio (+ transcript events) back out.
-
-    This is deliberately not a call/response interface: AssemblyAI owns
-    turn detection and barge-in itself and pushes events on its own
-    schedule. ws_conversation.py drives this class directly,
-    relaying audio bytes and forwarding normalized events to the browser.
+    Duplex bridge to AssemblyAI's managed Voice Agent API that handles STT,
+    LLM, and TTS together, so the server doesn't have to run its own LLM or TTS.
     """
 
     def __init__(self, scenario: Scenario):
@@ -37,33 +57,57 @@ class AssemblyAIRelay:
             raise AssemblyAIRelayError("ASSEMBLYAI_API_KEY is not set. Add it to .env to run LinguSim.")
         self._settings = settings
         self._ws: ClientConnection | None = None
+        self._base_system_prompt: str = ""
+        self._pending_prompt_revert = False
 
     async def connect(self) -> None:
-        self._ws = await websockets.connect(
-            self._settings.assemblyai_ws_url,
-            additional_headers={"Authorization": f"Bearer {self._settings.assemblyai_api_key}"},
-        )
+        """
+        Raises AssemblyAIRelayError for any failure to reach - the caller can catch and
+        turn into a friendly WebSocket error message, instead of an unhandled exception
+        that would crash the whole conversation_ws handler mid-demo.
+        """
+        try:
+            self._ws = await websockets.connect(
+                self._settings.assemblyai_ws_url,
+                additional_headers={"Authorization": f"Bearer {self._settings.assemblyai_api_key}"},
+            )
+            self._base_system_prompt = self.scenario.system_prompt()
+            await self._send_session_update(self._base_system_prompt, include_output=True)
+            await self._ws.send(
+                json.dumps({"type": "reply.create", "instructions": "Open the conversation, in character."})
+            )
+        except AssemblyAIRelayError:
+            raise
+        except Exception as exc:
+            logger.exception("assemblyai_connect_failed", extra={"context": {"scenario_id": self.scenario.id}})
+            raise AssemblyAIRelayError(
+                "Couldn't connect to the voice agent. Check your network and ASSEMBLYAI_API_KEY, then try again."
+            ) from exc
+        logger.info("assemblyai_session_started", extra={"context": {"scenario_id": self.scenario.id}})
+
+    async def _send_session_update(self, system_prompt: str, *, include_output: bool = False) -> None:
+        """
+        Sends session.update with the given system_prompt, repeating "tools"
+        too so a mid-session update never silently drops get_translation_hint.
+        Deliberately does NOT repeat "output" (voice) past the very first
+        call in connect() — confirmed live that AssemblyAI rejects any later
+        session.update that includes it at all, even with the same value,
+        with a session.error: "'output.voice' cannot be changed after the
+        first session.update".
+        """
+        if self._ws is None:
+            return
+        session: dict[str, Any] = {"system_prompt": system_prompt, "tools": _HINT_TOOLS}
+        if include_output:
+            session["output"] = {"voice": self._settings.assemblyai_voice_id}
         await self._ws.send(
             json.dumps(
                 {
                     "type": "session.update",
-                    "session": {
-                        "system_prompt": self.scenario.system_prompt(),
-                        "output": {"voice": self._settings.assemblyai_voice_id},
-                    },
+                    "session": session,
                 }
             )
         )
-        # No scripted "greeting" text: the scenario's objectives/success
-        # criteria are learner-facing instructions, not AI dialogue, and are
-        # already written in the scenario's own target_language — hardcoding
-        # any English framing around them would produce mixed-language
-        # speech for non-English scenarios. Instead, let the model open
-        # in character, in whatever language its system_prompt specifies.
-        await self._ws.send(
-            json.dumps({"type": "reply.create", "instructions": "Open the conversation, in character."})
-        )
-        logger.info("assemblyai_session_started", extra={"context": {"scenario_id": self.scenario.id}})
 
     async def send_audio_chunk(self, pcm16_bytes: bytes) -> None:
         if self._ws is None:
@@ -73,16 +117,35 @@ class AssemblyAIRelay:
         )
 
     async def send_user_text(self, text: str) -> None:
-        """Fallback path for typed input (when a browser has no mic access)."""
+        """
+        Fallback path for typed input (when a browser has no mic access).
+
+        AssemblyAI's Voice Agent API has no message type for injecting text
+        as if it had been spoken by the user — confirmed against the real
+        API's documented client messages (session.update, session.resume,
+        session.end, input.audio, tool.result, reply.create; there is no
+        "conversation.message" or equivalent). The closest real lever is
+        session.update: fold the typed text into the system prompt as a
+        one-time directive, then force a reply with reply.create — there's
+        no audio-driven turn to race here, since nothing was actually
+        spoken, so an explicit reply.create is exactly what's needed.
+        """
         if self._ws is None:
             return
-        await self._ws.send(json.dumps({"type": "conversation.message", "role": "user", "content": text}))
+        directive = (
+            "The learner just typed the following as their turn — they did not speak it "
+            f'aloud, but respond to it now, in character, as if they had said it: "{text}"'
+        )
+        await self._send_session_update(f"{self._base_system_prompt}\n\n{directive}")
+        self._pending_prompt_revert = True
         await self._ws.send(json.dumps({"type": "reply.create"}))
 
     async def inject_complication(self, description: str) -> None:
         """
-        Makes the simulation dynamic: pushes a system-level directive mid-
-        conversation (not attributed to the learner) so the AI actively
+        Makes the simulation dynamic: folds a one-time directive into the
+        system prompt (see send_user_text's docstring for why session.update
+        is the only real lever available for this — there's no message type
+        for injecting arbitrary conversation content) so the AI actively
         introduces a complication from the scenario's own possible_events
         into its next reply, in character — rather than just having been
         told about it once up front and maybe never using it. This is what
@@ -95,27 +158,26 @@ class AssemblyAIRelay:
         confirmed live, it produces two garbled, partially-overlapping
         replies instead of one that naturally works the complication in.
         Letting the already-pending/next natural reply pick this up avoids
-        that entirely, at the cost of it occasionally landing one turn
-        later than the trigger — an acceptable trade for a hackathon-scale
-        feature.
+        that entirely. Live testing found a consistent ~2 second gap
+        between the learner's turn finishing and that natural reply
+        starting, comfortably enough time for this session.update to land
+        first and actually be picked up.
         """
         if self._ws is None:
             return
-        await self._ws.send(
-            json.dumps(
-                {
-                    "type": "conversation.message",
-                    "role": "system",
-                    "content": f"Complication to introduce naturally in your next reply, in character: {description}",
-                }
-            )
+        directive = (
+            "IMPORTANT: work this into your very next reply naturally, in character, then "
+            f"don't mention it again unless it comes up naturally on its own: {description}"
         )
+        await self._send_session_update(f"{self._base_system_prompt}\n\n{directive}")
+        self._pending_prompt_revert = True
 
     async def events(self) -> AsyncIterator[dict[str, Any]]:
         """
         Normalizes AssemblyAI's event stream into the small vocabulary
         ws_conversation.py forwards to the browser: agent_text,
-        user_transcript, agent_audio, clear_audio (barge-in), error, ended.
+        user_transcript, agent_audio, clear_audio (barge-in), hint, error,
+        ended.
         """
         if self._ws is None:
             return
@@ -136,13 +198,72 @@ class AssemblyAIRelay:
                 # in-flight reply server-side; tell the browser to drop
                 # whatever agent audio it already has queued for playback.
                 yield {"type": "clear_audio"}
+            elif etype == "tool.call":
+                hint_event = await self._handle_tool_call(event)
+                if hint_event is not None:
+                    yield hint_event
             elif etype == "session.error":
                 yield {"type": "error", "message": event.get("message", "AssemblyAI session error")}
             elif etype == "session.ended":
                 yield {"type": "ended"}
                 return
-            # session.ready / session.updated / reply.started / reply.done /
-            # *.delta / tool.* are not needed for this MVP's UI.
+            elif etype == "reply.done" and self._pending_prompt_revert:
+                # The reply that inject_complication/send_user_text's
+                # one-time directive was aimed at has now finished (whether
+                # completed or barge-in interrupted) — put the base prompt
+                # back so the directive doesn't linger into later turns.
+                self._pending_prompt_revert = False
+                await self._send_session_update(self._base_system_prompt)
+            # session.ready / session.updated / reply.started / other
+            # reply.done / *.delta are not needed for this MVP's UI.
+
+    async def _handle_tool_call(self, event: dict[str, Any]) -> dict[str, Any] | None:
+        """
+        Executes a tool.call from AssemblyAI and sends its tool.result back.
+        Returns a normalized "hint" event for the browser (so the hint used
+        is visible, not just inferred from the AI's next line), or None if
+        the call was for an unknown tool.
+        """
+        call_id = event.get("call_id")
+        name = event.get("name")
+        arguments = event.get("arguments") or {}
+
+        if name != _HINT_TOOL_NAME:
+            logger.warning("unknown_tool_call", extra={"context": {"name": name}})
+            return None
+
+        term = str(arguments.get("term", ""))
+        translation = await self._call_dictionary_tool(term)
+
+        if self._ws is not None:
+            await self._ws.send(
+                json.dumps({"type": "tool.result", "call_id": call_id, "result": json.dumps({"translation": translation})})
+            )
+
+        # There's no hint_level argument from the model (see the comment on
+        # _HINT_TOOLS above for why) — a single word is a level-2 partial
+        # hint, multiple words is a level-3 target phrase.
+        hint_level = 3 if len(term.split()) > 1 else 2
+        return {"type": "hint", "term": term, "translation": translation, "level": hint_level}
+
+    async def _call_dictionary_tool(self, term: str) -> str:
+        """Bridges to the real MCP server in dictionary_mcp.py — see that
+        module's docstring for why this connects in-process rather than
+        over a network."""
+        try:
+            async with mcp.Client(dictionary_server) as client:
+                result = await client.call_tool(
+                    "translate", {"term": term, "target_language": self.scenario.target_language}
+                )
+        except Exception:
+            logger.warning("dictionary_tool_call_failed", exc_info=True, extra={"context": {"term": term}})
+            return f"Translation unavailable for '{term}'."
+
+        if result.structured_content and "result" in result.structured_content:
+            return str(result.structured_content["result"])
+        if result.content:
+            return str(result.content[0].text)
+        return f"Translation unavailable for '{term}'."
 
     async def end(self) -> None:
         if self._ws is None:
@@ -154,5 +275,9 @@ class AssemblyAIRelay:
 
     async def close(self) -> None:
         if self._ws is not None:
-            await self._ws.close()
-            self._ws = None
+            try:
+                await self._ws.close()
+            except Exception:
+                logger.warning("assemblyai_close_failed", exc_info=True)
+            finally:
+                self._ws = None

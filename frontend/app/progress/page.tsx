@@ -1,8 +1,21 @@
 import { fetchProfile, fetchSessions } from "@/lib/api";
 import ProgressChart from "@/components/ProgressChart";
+import LoadErrorBanner from "@/components/LoadErrorBanner";
+import type { LearnerProfile, SessionSummary } from "@/lib/types";
 
 export default async function ProgressPage() {
-  const [profile, sessions] = await Promise.all([fetchProfile(), fetchSessions()]);
+  let profile: LearnerProfile;
+  let sessions: SessionSummary[];
+  try {
+    [profile, sessions] = await Promise.all([fetchProfile(), fetchSessions()]);
+  } catch {
+    return (
+      <div className="flex flex-col gap-8">
+        <h1 className="text-2xl font-semibold tracking-tight">Journey</h1>
+        <LoadErrorBanner message="Couldn't load your journey." />
+      </div>
+    );
+  }
 
   const byDifficulty = sessions.reduce<Record<string, number>>((acc, s) => {
     acc[s.difficulty] = (acc[s.difficulty] ?? 0) + 1;
