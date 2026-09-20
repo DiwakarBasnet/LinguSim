@@ -14,6 +14,7 @@ def test_list_scenarios(client: TestClient):
     assert isinstance(body, list)
     assert any(s["id"] == "order_food" for s in body)
     assert any(s["id"] == "order_food_de" and s["target_language"] == "German" for s in body)
+    assert any(s["id"] == "order_food_ja" and s["target_language"] == "Japanese" for s in body)
 
 
 def test_get_scenario_404(client: TestClient):
@@ -57,6 +58,18 @@ def test_conversation_ws_injects_a_complication_every_two_learner_turns(client: 
         complication = ws.receive_json()
         assert complication["type"] == "complication"
         assert complication["text"]  # one of order_food's possible_events
+
+        ws.send_json({"type": "end"})
+        ended = ws.receive_json()
+        assert ended["type"] == "session_end"
+
+
+def test_conversation_ws_accepts_a_hint_language(client: TestClient):
+    with client.websocket_connect("/ws/conversation") as ws:
+        ws.send_json({"type": "start", "scenario_id": "order_food", "hint_language": "Japanese"})
+        ready = ws.receive_json()
+        assert ready == {"type": "session_ready"}
+        ws.receive_json()  # opening agent_text
 
         ws.send_json({"type": "end"})
         ended = ws.receive_json()

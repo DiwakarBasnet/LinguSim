@@ -1,0 +1,32 @@
+{
+  "id": "order_food_ja",
+  "title": "Ordering Food at a Cafe",
+  "description": "The learner walks into a small cafe and needs to order a meal, ask about ingredients, and pay. The whole conversation is conducted in Japanese.",
+  "target_language": "Japanese",
+  "difficulty": "beginner",
+  "duration_minutes": 4,
+  "ai_role": "a friendly cafe server",
+  "learner_role": "a customer ordering food",
+  "objectives": [
+    "Greet the server",
+    "Ask what is available",
+    "Order a food item and a drink",
+    "Ask for the bill"
+  ],
+  "vocabulary_themes": ["food", "drinks", "money", "polite requests"],
+  "grammar_themes": ["polite forms (desu/masu)", "onegaishimasu / kudasai requests"],
+  "possible_events": [
+    "The item the learner asks for is sold out and they must choose something else",
+    "The server asks if they want anything to drink",
+    "The learner is asked for how they'd like to pay"
+  ],
+  "success_criteria": [
+    "Learner successfully orders at least one food item",
+    "Learner responds appropriately when something is unavailable",
+    "Learner completes the payment step"
+  ],
+  "difficulty_modifiers": [
+    {"trigger": "struggling", "description": "Server simplifies to short yes/no style questions, e.g. 'Water or coffee?'"},
+    {"trigger": "excelling", "description": "Server improvises a complication, e.g. running out of the ordered dish and offering alternatives"}
+  ]
+}

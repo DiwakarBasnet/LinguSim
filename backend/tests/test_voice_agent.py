@@ -131,6 +131,77 @@ async def test_tool_call_infers_level_3_for_a_multi_word_phrase(monkeypatch: pyt
         get_settings.cache_clear()
 
 
+async def test_call_dictionary_tool_translates_from_the_learners_hint_language(monkeypatch: pytest.MonkeyPatch):
+    """The dictionary tool call must translate FROM the learner's chosen
+    hint_language (their native language) INTO the scenario's
+    target_language — not always from English, now that hint_language is a
+    learner preference independent of the scenario."""
+    monkeypatch.setenv("ASSEMBLYAI_API_KEY", "some-key")
+    get_settings.cache_clear()
+    try:
+        scenario = ScenarioLoader().get("order_food_de")  # target_language "German"
+        relay = AssemblyAIRelay(scenario, hint_language="Japanese")
+
+        calls: list[dict] = []
+
+        class FakeToolResult:
+            structured_content = {"result": "gestern"}
+            content = None
+
+        class FakeMCPClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def call_tool(self, name, arguments):
+                calls.append({"name": name, **arguments})
+                return FakeToolResult()
+
+        monkeypatch.setattr("app.services.voice_agent.assemblyai_client.mcp.Client", lambda server: FakeMCPClient())
+
+        translation = await relay._call_dictionary_tool("きのう")
+
+        assert translation == "gestern"
+        assert calls == [
+            {"name": "translate", "term": "きのう", "source_language": "Japanese", "target_language": "German"}
+        ]
+    finally:
+        get_settings.cache_clear()
+
+
+async def test_grammar_tool_call_returns_a_silent_grammar_hint_event(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("ASSEMBLYAI_API_KEY", "some-key")
+    get_settings.cache_clear()
+    try:
+        scenario = ScenarioLoader().get("order_food")
+        relay = AssemblyAIRelay(scenario, hint_language="German")
+        relay._ws = _FakeWebSocket(
+            [
+                {
+                    "type": "tool.call",
+                    "call_id": "call_3",
+                    "name": "flag_grammar_correction",
+                    "arguments": {"note": "Du hast 'ich haben' gesagt — richtig ist 'ich habe'."},
+                },
+                {"type": "session.ended"},
+            ]
+        )
+
+        events = [event async for event in relay.events()]
+
+        assert {
+            "type": "grammar_hint",
+            "note": "Du hast 'ich haben' gesagt — richtig ist 'ich habe'.",
+        } in events
+        tool_result = next(m for m in relay._ws.sent if m["type"] == "tool.result")
+        assert tool_result["call_id"] == "call_3"
+        assert json.loads(tool_result["result"]) == {"status": "ok"}
+    finally:
+        get_settings.cache_clear()
+
+
 async def test_connect_sends_the_hint_tool_definition(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ASSEMBLYAI_API_KEY", "some-key")
     get_settings.cache_clear()
@@ -160,6 +231,10 @@ async def test_connect_sends_the_hint_tool_definition(monkeypatch: pytest.Monkey
         # tried and found live to make the model skip calling the tool
         # entirely far more often; see the comment on _HINT_TOOLS.
         assert hint_tool["parameters"]["required"] == ["term"]
+
+        assert "flag_grammar_correction" in tool_names
+        grammar_tool = next(t for t in tools if t["name"] == "flag_grammar_correction")
+        assert grammar_tool["parameters"]["required"] == ["note"]
     finally:
         get_settings.cache_clear()
 

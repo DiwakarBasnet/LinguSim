@@ -9,7 +9,7 @@ export interface Scenario {
   id: string;
   title: string;
   description: string;
-  target_language: "English" | "German";
+  target_language: "English" | "German" | "Japanese";
   difficulty: Difficulty;
   duration_minutes: number;
   ai_role: string;
@@ -88,4 +88,9 @@ export interface SessionEndPayload {
   profile?: LearnerProfile;
   recommended_scenario_id?: string;
   error?: string;
+}
+
+export interface GrammarHintEvent {
+  type: "grammar_hint";
+  note: string;
 }

@@ -14,6 +14,7 @@ from app.services.dictionary_mcp import dictionary_server
 logger = logging.getLogger(__name__)
 
 _HINT_TOOL_NAME = "get_translation_hint"
+_GRAMMAR_TOOL_NAME = "flag_grammar_correction"
 _HINT_TOOLS = [
     {
         "type": "function",
@@ -29,14 +30,41 @@ _HINT_TOOLS = [
             "properties": {
                 "term": {
                     "type": "string",
-                    "description": "The English word (level 2) or full phrase (level 3) to translate.",
+                    "description": (
+                        "The word (level 2) or full phrase (level 3) to translate, in the "
+                        "learner's chosen hint language."
+                    ),
                 },
             },
             "required": ["term"],
         },
         "execution_mode": "interactive",
         "timeout_seconds": 8,
-    }
+    },
+    {
+        "type": "function",
+        "name": _GRAMMAR_TOOL_NAME,
+        "description": (
+            "Silently flag a grammar mistake the learner just made, per the grammar-correction "
+            "rules in your instructions. This never gets spoken aloud — it only surfaces to the "
+            "learner as a written note, so it never interrupts the conversation."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "note": {
+                    "type": "string",
+                    "description": (
+                        "A short correction, written entirely in the learner's chosen hint "
+                        "language: what was wrong and the corrected form."
+                    ),
+                },
+            },
+            "required": ["note"],
+        },
+        "execution_mode": "interactive",
+        "timeout_seconds": 8,
+    },
 ]
 
 
@@ -50,8 +78,9 @@ class AssemblyAIRelay:
     LLM, and TTS together, so the server doesn't have to run its own LLM or TTS.
     """
 
-    def __init__(self, scenario: Scenario):
+    def __init__(self, scenario: Scenario, hint_language: str = "English"):
         self.scenario = scenario
+        self.hint_language = hint_language
         settings = get_settings()
         if not settings.assemblyai_api_key:
             raise AssemblyAIRelayError("ASSEMBLYAI_API_KEY is not set. Add it to .env to run LinguSim.")
@@ -71,7 +100,7 @@ class AssemblyAIRelay:
                 self._settings.assemblyai_ws_url,
                 additional_headers={"Authorization": f"Bearer {self._settings.assemblyai_api_key}"},
             )
-            self._base_system_prompt = self.scenario.system_prompt()
+            self._base_system_prompt = self.scenario.system_prompt(self.hint_language)
             await self._send_session_update(self._base_system_prompt, include_output=True)
             await self._ws.send(
                 json.dumps({"type": "reply.create", "instructions": "Open the conversation, in character."})
@@ -220,13 +249,21 @@ class AssemblyAIRelay:
     async def _handle_tool_call(self, event: dict[str, Any]) -> dict[str, Any] | None:
         """
         Executes a tool.call from AssemblyAI and sends its tool.result back.
-        Returns a normalized "hint" event for the browser (so the hint used
-        is visible, not just inferred from the AI's next line), or None if
+        Returns a normalized "hint"/"grammar_hint" event for the browser (so
+        it's visible, not just inferred from the AI's next line), or None if
         the call was for an unknown tool.
         """
         call_id = event.get("call_id")
         name = event.get("name")
         arguments = event.get("arguments") or {}
+
+        if name == _GRAMMAR_TOOL_NAME:
+            note = str(arguments.get("note", ""))
+            if self._ws is not None:
+                await self._ws.send(
+                    json.dumps({"type": "tool.result", "call_id": call_id, "result": json.dumps({"status": "ok"})})
+                )
+            return {"type": "grammar_hint", "note": note}
 
         if name != _HINT_TOOL_NAME:
             logger.warning("unknown_tool_call", extra={"context": {"name": name}})
@@ -249,11 +286,17 @@ class AssemblyAIRelay:
     async def _call_dictionary_tool(self, term: str) -> str:
         """Bridges to the real MCP server in dictionary_mcp.py — see that
         module's docstring for why this connects in-process rather than
-        over a network."""
+        over a network. Translates from the learner's hint_language into
+        the scenario's target_language."""
         try:
             async with mcp.Client(dictionary_server) as client:
                 result = await client.call_tool(
-                    "translate", {"term": term, "target_language": self.scenario.target_language}
+                    "translate",
+                    {
+                        "term": term,
+                        "source_language": self.hint_language,
+                        "target_language": self.scenario.target_language,
+                    },
                 )
         except Exception:
             logger.warning("dictionary_tool_call_failed", exc_info=True, extra={"context": {"term": term}})

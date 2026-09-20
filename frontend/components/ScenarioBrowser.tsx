@@ -17,7 +17,12 @@ const DIFFICULTY_LABEL: Record<Difficulty, string> = {
   intermediate: "Intermediate",
   advanced: "Advanced",
 };
-const LANGUAGES: TargetLanguage[] = ["English", "German"];
+const LANGUAGES: TargetLanguage[] = ["English", "German", "Japanese"];
+const LANGUAGE_LABEL: Record<TargetLanguage, string> = {
+  English: "English",
+  German: "Deutsch",
+  Japanese: "日本語",
+};
 
 function groupByDifficulty(scenarios: Scenario[]): Record<Difficulty, Scenario[]> {
   const grouped: Record<Difficulty, Scenario[]> = { beginner: [], intermediate: [], advanced: [] };
@@ -50,7 +55,7 @@ export default function ScenarioBrowser({ scenarios }: { scenarios: Scenario[] }
                 : "text-black/60 hover:text-black dark:text-white/60 dark:hover:text-white"
             }`}
           >
-            {lang === "German" ? "Deutsch" : "English"}
+            {LANGUAGE_LABEL[lang]}
           </button>
         ))}
       </div>

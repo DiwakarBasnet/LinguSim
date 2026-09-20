@@ -1,6 +1,7 @@
-export type TargetLanguage = "English" | "German";
+export type TargetLanguage = "English" | "German" | "Japanese";
 
 const STORAGE_KEY = "speakquest:target_language";
+const VALID_LANGUAGES: TargetLanguage[] = ["English", "German", "Japanese"];
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -9,7 +10,7 @@ export function getStoredLanguage(): TargetLanguage {
   if (typeof window === "undefined") return "English";
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY);
-    return stored === "German" ? "German" : "English";
+    return (VALID_LANGUAGES as string[]).includes(stored ?? "") ? (stored as TargetLanguage) : "English";
   } catch {
     return "English";
   }

@@ -15,8 +15,9 @@ from app.models.scenario import Scenario
 class FakeRelay:
     """Stands in for AssemblyAIRelay: same public shape, no network."""
 
-    def __init__(self, scenario: Scenario):
+    def __init__(self, scenario: Scenario, hint_language: str = "English"):
         self.scenario = scenario
+        self.hint_language = hint_language
 
     async def connect(self) -> None:
         return None

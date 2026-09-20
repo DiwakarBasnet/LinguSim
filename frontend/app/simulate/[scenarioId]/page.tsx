@@ -10,6 +10,7 @@ import {
   type AudioPlayerHandle,
   type MicStreamHandle,
 } from "@/lib/audioStream";
+import { getStoredHintLanguage } from "@/lib/hintLanguage";
 import type { EvaluationResult, Scenario, SessionEndPayload, Transcript, Turn } from "@/lib/types";
 
 type Status = "loading" | "connecting" | "in_progress" | "ended" | "error";
@@ -38,6 +39,7 @@ export default function SimulatePage({
   const [latestHint, setLatestHint] = useState<{ term: string; translation: string; level: number } | null>(
     null,
   );
+  const [latestGrammarHint, setLatestGrammarHint] = useState<string | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
   const micHandleRef = useRef<MicStreamHandle | null>(null);
@@ -90,7 +92,8 @@ export default function SimulatePage({
 
     socket.onopen = () => {
       setStatus("connecting");
-      socket.send(JSON.stringify({ type: "start", scenario_id: scenario.id }));
+      const hintLanguage = getStoredHintLanguage() ?? "English";
+      socket.send(JSON.stringify({ type: "start", scenario_id: scenario.id, hint_language: hintLanguage }));
     };
 
     socket.onmessage = (event) => {
@@ -120,6 +123,8 @@ export default function SimulatePage({
         setLatestComplication(message.text);
       } else if (message.type === "hint") {
         setLatestHint({ term: message.term, translation: message.translation, level: message.level });
+      } else if (message.type === "grammar_hint") {
+        setLatestGrammarHint(message.note);
       } else if (message.type === "session_end") {
         const payload = message as SessionEndPayload;
         setFinalTranscript(payload.transcript);
@@ -255,6 +260,12 @@ export default function SimulatePage({
       {latestHint && status === "in_progress" && (
         <p className="rounded-md border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-700 dark:text-sky-400">
           💡 Hint (level {latestHint.level}) — &ldquo;{latestHint.term}&rdquo; → {latestHint.translation}
+        </p>
+      )}
+
+      {latestGrammarHint && status === "in_progress" && (
+        <p className="rounded-md border border-violet-500/30 bg-violet-500/10 px-4 py-3 text-sm text-violet-700 dark:text-violet-400">
+          ✏️ Grammar note — {latestGrammarHint}
         </p>
       )}
 

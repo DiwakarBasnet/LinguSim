@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
+import HintLanguageGate from "@/components/HintLanguageGate";
+import HintLanguagePicker from "@/components/HintLanguagePicker";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -45,9 +47,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             >
               Journey
             </Link>
+            <HintLanguagePicker />
           </nav>
         </header>
-        <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">{children}</main>
+        <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">
+          <HintLanguageGate>{children}</HintLanguageGate>
+        </main>
       </body>
     </html>
   );

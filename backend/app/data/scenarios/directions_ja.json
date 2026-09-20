@@ -1,0 +1,29 @@
+{
+  "id": "directions_ja",
+  "title": "Asking for Directions",
+  "description": "The learner is lost in a city and stops a passerby to ask how to get to a train station. The whole conversation is conducted in Japanese.",
+  "target_language": "Japanese",
+  "difficulty": "beginner",
+  "duration_minutes": 4,
+  "ai_role": "a helpful local passerby",
+  "learner_role": "a lost visitor asking for directions",
+  "objectives": [
+    "Politely stop someone and explain you are lost",
+    "Ask how to get to the train station",
+    "Confirm you understood the directions"
+  ],
+  "vocabulary_themes": ["directions", "places", "transport"],
+  "grammar_themes": ["polite requests (te-form)", "location particles"],
+  "possible_events": [
+    "The directions involve multiple turns and the learner must ask for repetition",
+    "The passerby mentions the station is closed and suggests an alternative"
+  ],
+  "success_criteria": [
+    "Learner clearly states what they are looking for",
+    "Learner confirms or repeats back the directions given"
+  ],
+  "difficulty_modifiers": [
+    {"trigger": "struggling", "description": "Give one simple direction at a time, e.g. 'Turn left. Then stop.'"},
+    {"trigger": "excelling", "description": "Give multi-step directions with landmarks in one breath"}
+  ]
+}

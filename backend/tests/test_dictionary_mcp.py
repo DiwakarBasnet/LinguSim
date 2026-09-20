@@ -24,8 +24,13 @@ def test_best_translation_handles_empty_response():
     assert _best_translation({}, "yesterday") == "Translation unavailable for 'yesterday'."
 
 
-async def test_translate_rejects_unsupported_language():
-    result = await translate(term="hello", target_language="French")
+async def test_translate_rejects_unsupported_source_language():
+    result = await translate(term="hello", source_language="French", target_language="English")
+    assert "Unsupported source_language" in result
+
+
+async def test_translate_rejects_unsupported_target_language():
+    result = await translate(term="hello", source_language="English", target_language="French")
     assert "Unsupported target_language" in result
 
 
@@ -40,8 +45,23 @@ async def test_translate_calls_mymemory_and_returns_translation(monkeypatch: pyt
 
     monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
 
-    result = await translate(term="yesterday", target_language="German")
+    result = await translate(term="yesterday", source_language="English", target_language="German")
     assert result == "gestern"
+
+
+async def test_translate_supports_japanese(monkeypatch: pytest.MonkeyPatch):
+    async def fake_get(self, url, params=None, **kwargs):
+        assert params["langpair"] == "en|ja"
+        return httpx.Response(
+            200,
+            json={"responseData": {"translatedText": "きのう"}, "matches": []},
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+    result = await translate(term="yesterday", source_language="English", target_language="Japanese")
+    assert result == "きのう"
 
 
 async def test_translate_never_raises_on_network_failure(monkeypatch: pytest.MonkeyPatch):
@@ -50,7 +70,7 @@ async def test_translate_never_raises_on_network_failure(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
 
-    result = await translate(term="yesterday", target_language="German")
+    result = await translate(term="yesterday", source_language="English", target_language="German")
     assert "unavailable" in result.lower()
 
 

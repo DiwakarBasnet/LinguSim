@@ -29,7 +29,7 @@ async def conversation_ws(websocket: WebSocket) -> None:
     directions alongside JSON transcript/control events.
 
     client -> server:
-      {"type": "start", "scenario_id": "order_food"}
+      {"type": "start", "scenario_id": "order_food", "hint_language": "English"}
       {"type": "user_text", "text": "..."}      # typed fallback
       {"type": "end"}
       <binary PCM16 24kHz mono frame>            # mic audio
@@ -41,10 +41,16 @@ async def conversation_ws(websocket: WebSocket) -> None:
       {"type": "clear_audio"}                    # barge-in: stop playback
       {"type": "complication", "text": "..."}     # a scripted complication just fired
       {"type": "hint", "term": "...", "translation": "...", "level": 2 | 3}
+      {"type": "grammar_hint", "note": "..."}     # silent correction, in the learner's hint_language
       {"type": "session_end", "transcript": {...}, "evaluation": {...},
        "profile": {...}, "recommended_scenario_id": "..."}
       {"type": "error", "message": "..."}
       <binary PCM16 24kHz mono frame>            # agent reply audio
+
+    `hint_language` on "start" is the language the learner understands best
+    (their own preference, selected up front, independent of the scenario's
+    target_language) — every "hint" and "grammar_hint" event is given in it.
+    Defaults to "English" when omitted.
     """
     await websocket.accept()
     loader = get_scenario_loader()
@@ -99,6 +105,8 @@ async def conversation_ws(websocket: WebSocket) -> None:
                             "level": event["level"],
                         }
                     )
+                elif etype == "grammar_hint":
+                    await websocket.send_json({"type": "grammar_hint", "note": event["note"]})
                 elif etype == "error":
                     await websocket.send_json({"type": "error", "message": event["message"]})
                 elif etype == "ended":
@@ -143,6 +151,7 @@ async def conversation_ws(websocket: WebSocket) -> None:
 
             if msg_type == "start":
                 scenario_id = message.get("scenario_id")
+                hint_language = message.get("hint_language") or "English"
                 try:
                     scenario = loader.get(scenario_id)
                 except ScenarioNotFoundError:
@@ -152,7 +161,7 @@ async def conversation_ws(websocket: WebSocket) -> None:
                     continue
 
                 try:
-                    relay = AssemblyAIRelay(scenario)
+                    relay = AssemblyAIRelay(scenario, hint_language)
                     await relay.connect()
                 except AssemblyAIRelayError as exc:
                     await websocket.send_json({"type": "error", "message": str(exc)})
