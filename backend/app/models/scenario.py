@@ -45,7 +45,8 @@ class Scenario(BaseModel):
             f"CRITICAL RULE, overriding everything else below when it applies: you do not know "
             f"{self.target_language} vocabulary yourself for hint purposes — only the "
             "get_translation_hint tool does. Any time you are about to say a specific "
-            f"{self.target_language} word or phrase as a hint to help the learner, you must call "
+            f"{self.target_language} word or phrase as a hint to help the learner, OR explain a "
+            f"{self.target_language} phrase they didn't understand, you must call "
             "that tool first and use its returned translation, even for a word you feel "
             "confident about — never answer a translation question from your own knowledge. "
             "This tool call is silent and instant to the learner, so there is never a reason to "
@@ -57,7 +58,7 @@ class Scenario(BaseModel):
             f"You are role-playing as {self.ai_role} in a {self.target_language} language-practice "
             f"scenario called '{self.title}'.",
             f"Conduct the ENTIRE conversation in {self.target_language} — every line you speak must "
-            f"be in {self.target_language}, even though these instructions are written in English.",
+            f"be in {self.target_language}, EXCEPT when giving a hint or explaining something they didn't understand, which should be spoken in {hint_language}.",
             f"The learner is playing: {self.learner_role}.",
             f"Scenario: {self.description}",
         ]
@@ -83,12 +84,12 @@ class Scenario(BaseModel):
             "they explicitly ask for help or are fully stuck (never proactively):\n"
             f"1. Conceptual hint: a nudge about which grammar/vocabulary concept to use, in "
             f"{hint_language}, in character — no tool needed.\n"
-            f"2. Partial hint: call get_translation_hint with the single {hint_language} word "
-            "the learner is missing, then weave the translation it returns into a short nudge "
-            "(e.g. a sentence starter with a blank).\n"
-            f"3. Target phrase: call get_translation_hint with the full {hint_language} phrase "
+            f"2. Partial hint: call get_translation_hint (direction='into_target') with the single {hint_language} word "
+            "the learner is missing, then weave the translation it returns into a short nudge.\n"
+            f"3. Target phrase: call get_translation_hint (direction='into_target') with the full {hint_language} phrase "
             "they should say, then say the translation it returns as the suggested phrase.\n"
-            "4. Full correction: only if nothing else has worked and the conversation truly "
+            f"4. Comprehension hint: if the learner didn't understand what you just said, call get_translation_hint (direction='into_hint') with the {self.target_language} phrase they didn't understand, then tell them the {hint_language} translation.\n"
+            "5. Full correction: only if nothing else has worked and the conversation truly "
             "cannot continue — say the natural full sentence yourself, in your own words, no "
             "tool needed.\n"
             "Never interrupt to correct mistakes unprompted — mistakes get saved for feedback "

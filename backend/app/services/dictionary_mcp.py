@@ -1,9 +1,10 @@
 """
 A small MCP server exposing one tool — translating a word or short phrase
-between English and German — backed by the free MyMemory Translation API
-(https://mymemory.translated.net/), a real external data source. This is
-what grounds Level 2/3 hints in an actual translation instead of the voice
-agent guessing/hallucinating vocabulary.
+between any two of English, German, and Japanese — backed by the free
+MyMemory Translation API (https://mymemory.translated.net/), a real
+external data source. This is what grounds Level 2/3 hints (and grammar
+corrections) in an actual translation instead of the voice agent
+guessing/hallucinating vocabulary.
 
 Connected in-process: `mcp.Client(dictionary_server)` (see
 assemblyai_client.py) talks to this MCPServer instance directly rather than
@@ -24,32 +25,32 @@ from mcp.server.mcpserver import MCPServer
 logger = logging.getLogger(__name__)
 
 _MYMEMORY_URL = "https://api.mymemory.translated.net/get"
-_LANG_CODES = {"English": "en", "German": "de"}
+_LANG_CODES = {"English": "en", "German": "de", "Japanese": "ja"}
 
 dictionary_server = MCPServer(
     name="lingusim-dictionary",
     instructions=(
-        "Translate a single word or short phrase between English and German, "
-        "for grounding language-learning hints in a real translation."
+        "Translate a single word or short phrase between any two of English, German, "
+        "and Japanese, for grounding language-learning hints in a real translation."
     ),
 )
 
 
 @dictionary_server.tool()
-async def translate(term: str, target_language: str) -> str:
+async def translate(term: str, source_language: str, target_language: str) -> str:
     """
-    Translate `term` into `target_language` ("English" or "German") via the
-    MyMemory Translation API. Returns the translated text, or a plain
-    "unavailable" string on any failure — this tool never raises, so a
-    flaky translation API can never crash the live voice session.
+    Translate `term` from `source_language` into `target_language` (each one
+    of "English", "German", "Japanese") via the MyMemory Translation API.
+    Returns the translated text, or a plain "unavailable" string on any
+    failure — this tool never raises, so a flaky translation API can never
+    crash the live voice session.
     """
+    source_code = _LANG_CODES.get(source_language)
     target_code = _LANG_CODES.get(target_language)
+    if source_code is None:
+        return f"Unsupported source_language '{source_language}'."
     if target_code is None:
         return f"Unsupported target_language '{target_language}'."
-
-    # This app only ever has two languages in play — the source is
-    # whichever of the two isn't the requested target.
-    source_code = "de" if target_code == "en" else "en"
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:

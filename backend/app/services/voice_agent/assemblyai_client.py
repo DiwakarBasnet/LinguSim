@@ -20,9 +20,9 @@ _HINT_TOOLS = [
         "type": "function",
         "name": _HINT_TOOL_NAME,
         "description": (
-            "Look up a real translation for a word or short phrase the learner is stuck on, "
+            "Look up a real translation for a word or short phrase the learner is stuck on or didn't understand, "
             "so a hint can be grounded in an actual translation instead of a guess. Only call "
-            "this for Level 2 (partial hint) or Level 3 (target phrase) hints, per the hint "
+            "this for hints (Level 2, Level 3, or Comprehension hints), per the hint "
             "system in your instructions — never proactively."
         ),
         "parameters": {
@@ -31,12 +31,19 @@ _HINT_TOOLS = [
                 "term": {
                     "type": "string",
                     "description": (
-                        "The word (level 2) or full phrase (level 3) to translate, in the "
-                        "learner's chosen hint language."
+                        "The word or short phrase to translate."
                     ),
                 },
+                "direction": {
+                    "type": "string",
+                    "enum": ["into_target", "into_hint"],
+                    "description": (
+                        "Translate 'into_target' (from Hint Language to Target Language) if the learner doesn't know how to say something. "
+                        "Translate 'into_hint' (from Target Language to Hint Language) if the learner didn't understand what you said."
+                    )
+                },
             },
-            "required": ["term"],
+            "required": ["term", "direction"],
         },
         "execution_mode": "interactive",
         "timeout_seconds": 8,
@@ -270,7 +277,16 @@ class AssemblyAIRelay:
             return None
 
         term = str(arguments.get("term", ""))
-        translation = await self._call_dictionary_tool(term)
+        direction = str(arguments.get("direction", "into_target"))
+        
+        if direction == "into_hint":
+            src_lang = self.scenario.target_language
+            tgt_lang = self.hint_language
+        else:
+            src_lang = self.hint_language
+            tgt_lang = self.scenario.target_language
+
+        translation = await self._call_dictionary_tool(term, src_lang, tgt_lang)
 
         if self._ws is not None:
             await self._ws.send(
@@ -283,19 +299,18 @@ class AssemblyAIRelay:
         hint_level = 3 if len(term.split()) > 1 else 2
         return {"type": "hint", "term": term, "translation": translation, "level": hint_level}
 
-    async def _call_dictionary_tool(self, term: str) -> str:
+    async def _call_dictionary_tool(self, term: str, src_lang: str, tgt_lang: str) -> str:
         """Bridges to the real MCP server in dictionary_mcp.py — see that
         module's docstring for why this connects in-process rather than
-        over a network. Translates from the learner's hint_language into
-        the scenario's target_language."""
+        over a network. Translates between given languages."""
         try:
             async with mcp.Client(dictionary_server) as client:
                 result = await client.call_tool(
                     "translate",
                     {
                         "term": term,
-                        "source_language": self.hint_language,
-                        "target_language": self.scenario.target_language,
+                        "source_language": src_lang,
+                        "target_language": tgt_lang,
                     },
                 )
         except Exception:
