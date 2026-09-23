@@ -194,10 +194,23 @@ export default function SimulatePage({
     }
   };
 
-  const endSession = () => {
+  const endSession = useCallback(() => {
+    if (endRequested) return;
     setEndRequested(true);
+    // Stop recording and playing audio immediately so we don't flood the backend
+    // while it's evaluating the session.
+    teardownAudio();
+    setListening(false);
     socketRef.current?.send(JSON.stringify({ type: "end" }));
-  };
+  }, [endRequested, teardownAudio]);
+
+  // Auto-end session if the timer reaches the duration_minutes limit
+  useEffect(() => {
+    if (status !== "in_progress" || !scenario || endRequested) return;
+    if (elapsedSeconds >= scenario.duration_minutes * 60) {
+      endSession();
+    }
+  }, [elapsedSeconds, status, scenario, endRequested, endSession]);
 
   const minutes = String(Math.floor(elapsedSeconds / 60)).padStart(2, "0");
   const seconds = String(elapsedSeconds % 60).padStart(2, "0");
